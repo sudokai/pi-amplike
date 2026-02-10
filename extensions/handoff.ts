@@ -17,7 +17,7 @@
  */
 
 import { complete, type Message } from "@mariozechner/pi-ai";
-import type { ExtensionAPI, ExtensionContext, SessionEntry } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext, SessionEntry } from "@mariozechner/pi-coding-agent";
 import { BorderedLoader, convertToLlm, serializeConversation } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 
@@ -125,21 +125,32 @@ async function performHandoff(pi: ExtensionAPI, ctx: ExtensionContext, goal: str
 		finalPrompt = `${goal}\n\n${result}`;
 	}
 
-	// Create new session and send the prompt.
-	// When called from a tool, we must defer the session switch until after
-	// the current turn completes (tool_result is recorded), otherwise the
-	// new session gets a tool_result without a corresponding tool_use block.
-	const sm = ctx.sessionManager as any;
-	const doSwitch = () => {
-		sm.newSession({ parentSession: currentSessionFile });
-		pi.sendUserMessage(finalPrompt, { deliverAs: "followUp" });
+	// Switch to new session and send prompt.
+	// Command context has ctx.newSession() which does a full reset (agent state,
+	// queues, UI). Tool context doesn't, so we fall back to the low-level
+	// sessionManager.newSession() which resets session entries (and thus
+	// token/cost counters in the footer). Context % may be stale for one turn
+	// until the first LLM response in the new session refreshes it.
+	const doSwitch = async () => {
+		if (!fromTool && 'newSession' in ctx) {
+			// Command path: full reset via ctx.newSession()
+			const cmdCtx = ctx as ExtensionCommandContext;
+			const newSessionResult = await cmdCtx.newSession({ parentSession: currentSessionFile });
+			if (newSessionResult.cancelled) return;
+			pi.sendUserMessage(finalPrompt);
+		} else {
+			// Tool path: low-level session switch
+			const sm = ctx.sessionManager as any;
+			sm.newSession({ parentSession: currentSessionFile });
+			pi.sendUserMessage(finalPrompt, { deliverAs: "followUp" });
+		}
 	};
 
 	if (fromTool) {
 		// Defer to next tick so the tool_result is recorded in the OLD session first
 		setTimeout(doSwitch, 0);
 	} else {
-		doSwitch();
+		await doSwitch();
 	}
 	return undefined;
 }
