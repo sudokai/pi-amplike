@@ -471,12 +471,7 @@ function inferModeFromSelection(selection: SelectionSnapshot, data: ModesFile): 
 
 function updateModeStatus(ctx: ExtensionContext): void {
 	if (!ctx.hasUI) return;
-	if (!runtime.overlayEnabled) {
-		ctx.ui.setStatus("modes", undefined);
-		return;
-	}
-
-	ctx.ui.setStatus("modes", ctx.ui.theme.fg("dim", `mode:${runtime.currentMode}`));
+	ctx.ui.setStatus("modes", undefined);
 }
 
 async function syncModeFromCurrentSelection(pi: ExtensionAPI, ctx: ExtensionContext): Promise<void> {
