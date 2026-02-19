@@ -320,7 +320,25 @@ function ruleAppliesToBash(rule: AmpPermission): boolean {
 
 const GLOBAL_SETTINGS = join(homedir(), ".config", "amp", "settings.json");
 
+// Permission mode: "enabled" (default) or "yolo" (all commands allowed without checks)
+let permissionMode: "enabled" | "yolo" = "enabled";
+
 export default function (pi: ExtensionAPI) {
+	pi.registerCommand("permissions", {
+		description: "Toggle permission mode between 'enabled' (amp rules) and 'yolo' (all commands allowed)",
+		handler: async (_args, ctx) => {
+			if (permissionMode === "enabled") {
+				permissionMode = "yolo";
+				ctx.ui.setStatus("permissions", "YOLO mode");
+				ctx.ui.notify("Permissions: switched to YOLO mode — all bash commands allowed without checks", "warning");
+			} else {
+				permissionMode = "enabled";
+				ctx.ui.setStatus("permissions", undefined);
+				ctx.ui.notify("Permissions: switched to enabled mode — amp permission rules active", "info");
+			}
+		},
+	});
+
 	pi.on("session_start", async (_event, ctx) => {
 		// Warn about any non-Bash permission rules in the user's config
 		const settings = loadSettings([GLOBAL_SETTINGS, resolve(ctx.cwd, ".agents", "settings.json")]);
@@ -336,6 +354,9 @@ export default function (pi: ExtensionAPI) {
 
 	pi.on("tool_call", async (event, ctx) => {
 		if (event.toolName !== "bash") return undefined;
+
+		// YOLO mode: bypass all permission checks
+		if (permissionMode === "yolo") return undefined;
 
 		const command = event.input.command as string;
 		const strippedCommand = command.trim().replace(CD_PREFIX_RE, "").trim();

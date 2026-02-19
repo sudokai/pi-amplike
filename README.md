@@ -96,6 +96,17 @@ session_query("/path/to/session.jsonl", "What files were modified?")
 session_query("/path/to/session.jsonl", "What approach was chosen?")
 ```
 
+### Permissions
+
+The permissions extension enforces Amp-style bash command permissions automatically. Use the `/permissions` command to toggle modes:
+
+```
+/permissions    # toggles between enabled and yolo
+```
+
+- **enabled** (default): Amp permission rules from `~/.config/amp/settings.json` are enforced
+- **yolo**: All bash commands are allowed without any checks; `YOLO mode` shown in status bar
+
 ### Prompt Modes
 
 ```text
@@ -127,7 +138,7 @@ Notes:
 | Component | Type | Description |
 |-----------|------|-------------|
 | [amp-skills](extensions/amp-skills.ts) | Extension | Adds Amp-compatible skill discovery paths (`~/.config/agents/skills`, `~/.config/amp/skills`, `.agents/skills`) |
-| [permissions](extensions/permissions.ts) | Extension | Reads `amp.commands.allowlist` and `amp.permissions` from `~/.config/amp/settings.json` (and `.agents/settings.json`) and intercepts bash tool calls accordingly |
+| [permissions](extensions/permissions.ts) | Extension | Reads `amp.commands.allowlist` and `amp.permissions` from `~/.config/amp/settings.json` (and `.agents/settings.json`) and intercepts bash tool calls accordingly; `/permissions` toggles between `enabled` and `yolo` (all commands allowed, status bar indicator) |
 | [handoff](extensions/handoff.ts) | Extension | `/handoff` command + `handoff` tool for AI-powered context transfer |
 | [modes](extensions/modes.ts) | Extension | Prompt mode manager with model/thinking/color presets, editor border overlay, and shortcuts |
 | [session-query](extensions/session-query.ts) | Extension | `session_query` tool for querying parent sessions |
