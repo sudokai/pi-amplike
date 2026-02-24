@@ -10,8 +10,8 @@
  *
  * Usage:
  *   /handoff now implement this for teams as well
- *   /handoff execute phase one of the plan
- *   /handoff check other places that need this fix
+ *   /handoff -mode rush execute phase one of the plan
+ *   /handoff -model anthropic/claude-haiku-4-5 check other places that need this fix
  *
  * The generated prompt appears as a draft in the editor for review/editing.
  */
@@ -43,6 +43,108 @@ Files involved:
 ## Task
 [Clear description of what to do next based on user's goal]`;
 
+type HandoffOptions = {
+	mode?: string;
+	model?: string;
+};
+
+/**
+ * Load a mode spec from modes.json by name.
+ * Returns the spec if found, or undefined.
+ */
+async function loadModeSpec(
+	cwd: string,
+	modeName: string,
+): Promise<{ provider?: string; modelId?: string; thinkingLevel?: string } | undefined> {
+	const fsModule = await import("node:fs");
+	const pathModule = await import("node:path");
+	const osModule = await import("node:os");
+
+	const expandUser = (p: string) => {
+		if (p === "~") return osModule.homedir();
+		if (p.startsWith("~/")) return pathModule.join(osModule.homedir(), p.slice(2));
+		return p;
+	};
+
+	const agentDir = process.env.PI_CODING_AGENT_DIR
+		? expandUser(process.env.PI_CODING_AGENT_DIR)
+		: pathModule.join(osModule.homedir(), ".pi", "agent");
+
+	// Check project modes first, then global
+	const candidates = [
+		pathModule.join(cwd, ".pi", "modes.json"),
+		pathModule.join(agentDir, "modes.json"),
+	];
+
+	for (const modesPath of candidates) {
+		try {
+			const raw = fsModule.readFileSync(modesPath, "utf8");
+			const parsed = JSON.parse(raw);
+			if (parsed.modes && typeof parsed.modes === "object" && parsed.modes[modeName]) {
+				const spec = parsed.modes[modeName];
+				return {
+					provider: typeof spec.provider === "string" ? spec.provider : undefined,
+					modelId: typeof spec.modelId === "string" ? spec.modelId : undefined,
+					thinkingLevel: typeof spec.thinkingLevel === "string" ? spec.thinkingLevel : undefined,
+				};
+			}
+		} catch {
+			continue;
+		}
+	}
+	return undefined;
+}
+
+/**
+ * Apply -mode and -model options after a session switch.
+ * For -mode, reads mode spec from modes.json and applies model+thinking.
+ * For -model, applies the model directly.
+ * The modes extension will sync its state from the resulting model_select event.
+ */
+async function applyHandoffOptions(
+	pi: ExtensionAPI,
+	ctx: ExtensionContext,
+	options?: HandoffOptions,
+): Promise<void> {
+	if (!options) return;
+
+	if (options.mode) {
+		const spec = await loadModeSpec(ctx.cwd, options.mode);
+		if (spec) {
+			if (spec.provider && spec.modelId) {
+				const model = ctx.modelRegistry.find(spec.provider, spec.modelId);
+				if (model) {
+					await pi.setModel(model);
+				} else {
+					ctx.hasUI && ctx.ui.notify(`Handoff: mode "${options.mode}" references unknown model ${spec.provider}/${spec.modelId}`, "warning");
+				}
+			}
+			if (spec.thinkingLevel) {
+				pi.setThinkingLevel(spec.thinkingLevel as any);
+			}
+		} else {
+			ctx.hasUI && ctx.ui.notify(`Handoff: unknown mode "${options.mode}"`, "warning");
+		}
+	}
+
+	if (options.model) {
+		// Parse "provider/modelId" format
+		const slashIdx = options.model.indexOf("/");
+		if (slashIdx > 0) {
+			const provider = options.model.slice(0, slashIdx);
+			const modelId = options.model.slice(slashIdx + 1);
+			const model = ctx.modelRegistry.find(provider, modelId);
+			if (model) {
+				await pi.setModel(model);
+			} else {
+				ctx.hasUI && ctx.ui.notify(`Handoff: unknown model ${options.model}`, "warning");
+			}
+		} else {
+			ctx.hasUI && ctx.ui.notify(`Handoff: invalid model format "${options.model}", expected provider/modelId`, "warning");
+		}
+	}
+}
+
 /**
  * Core handoff logic. Returns an error string on failure, or undefined on success.
  */
@@ -50,9 +152,10 @@ async function performHandoff(
 	pi: ExtensionAPI,
 	ctx: ExtensionContext,
 	goal: string,
-	pendingHandoff: { prompt: string; parentSession: string | undefined } | null,
-	setPendingHandoff: (v: { prompt: string; parentSession: string | undefined } | null) => void,
+	pendingHandoff: { prompt: string; parentSession: string | undefined; options?: HandoffOptions } | null,
+	setPendingHandoff: (v: { prompt: string; parentSession: string | undefined; options?: HandoffOptions } | null) => void,
 	fromTool = false,
+	options?: HandoffOptions,
 ): Promise<string | undefined> {
 	if (!ctx.hasUI) {
 		return "Handoff requires interactive mode.";
@@ -137,6 +240,7 @@ async function performHandoff(
 		const cmdCtx = ctx as ExtensionCommandContext;
 		const newSessionResult = await cmdCtx.newSession({ parentSession: currentSessionFile });
 		if (newSessionResult.cancelled) return;
+		await applyHandoffOptions(pi, ctx, options);
 		pi.sendUserMessage(finalPrompt);
 	} else {
 		// Tool path: defer session switch to agent_end handler.
@@ -144,7 +248,7 @@ async function performHandoff(
 		// has it). Instead, we store the handoff data and let the agent_end handler
 		// perform the session switch after the current agent loop completes.
 		// The context event handler ensures the LLM only sees new-session messages.
-		setPendingHandoff({ prompt: finalPrompt, parentSession: currentSessionFile });
+		setPendingHandoff({ prompt: finalPrompt, parentSession: currentSessionFile, options });
 	}
 
 	return undefined;
@@ -152,14 +256,14 @@ async function performHandoff(
 
 export default function (pi: ExtensionAPI) {
 	// Shared state for tool-path handoff coordination between handlers
-	let pendingHandoff: { prompt: string; parentSession: string | undefined } | null = null;
+	let pendingHandoff: { prompt: string; parentSession: string | undefined; options?: HandoffOptions } | null = null;
 
 	// Timestamp marking when the handoff session switch occurred.
 	// Used by the context event handler to filter out pre-handoff messages
 	// from agent.state.messages (which aren't cleared by the low-level switch).
 	let handoffTimestamp: number | null = null;
 
-	const setPendingHandoff = (v: typeof pendingHandoff) => {
+	const setPendingHandoff = (v: { prompt: string; parentSession: string | undefined; options?: HandoffOptions } | null) => {
 		pendingHandoff = v;
 	};
 
@@ -208,7 +312,7 @@ export default function (pi: ExtensionAPI) {
 	pi.on("agent_end", (_event, ctx) => {
 		if (!pendingHandoff) return;
 
-		const { prompt, parentSession } = pendingHandoff;
+		const { prompt, parentSession, options } = pendingHandoff;
 		pendingHandoff = null;
 
 		// Record timestamp BEFORE switching - all old messages have timestamps
@@ -223,7 +327,8 @@ export default function (pi: ExtensionAPI) {
 		// loop's _runLoop cleanup has fully completed (isStreaming reset,
 		// runningPrompt resolved). Without this, we'd have two concurrent
 		// _runLoop instances with conflicting state.
-		setTimeout(() => {
+		setTimeout(async () => {
+			await applyHandoffOptions(pi, ctx, options);
 			pi.sendUserMessage(prompt);
 		}, 0);
 	});
@@ -260,15 +365,32 @@ export default function (pi: ExtensionAPI) {
 
 	// /handoff command
 	pi.registerCommand("handoff", {
-		description: "Transfer context to a new focused session",
+		description: "Transfer context to a new focused session (-mode <name>, -model <provider/id>)",
 		handler: async (args, ctx) => {
-			const goal = args.trim();
+			// Parse optional -mode and -model flags from args
+			const options: HandoffOptions = {};
+			let remaining = args;
+
+			const modeMatch = remaining.match(/(?:^|\s)-mode\s+(\S+)/);
+			if (modeMatch) {
+				options.mode = modeMatch[1];
+				remaining = remaining.replace(modeMatch[0], " ");
+			}
+
+			const modelMatch = remaining.match(/(?:^|\s)-model\s+(\S+)/);
+			if (modelMatch) {
+				options.model = modelMatch[1];
+				remaining = remaining.replace(modelMatch[0], " ");
+			}
+
+			const goal = remaining.trim();
 			if (!goal) {
-				ctx.ui.notify("Usage: /handoff <goal for new thread>", "error");
+				ctx.ui.notify("Usage: /handoff [-mode <name>] [-model <provider/id>] <goal>", "error");
 				return;
 			}
 
-			const error = await performHandoff(pi, ctx, goal, pendingHandoff, setPendingHandoff);
+			const hasOptions = options.mode || options.model;
+			const error = await performHandoff(pi, ctx, goal, pendingHandoff, setPendingHandoff, false, hasOptions ? options : undefined);
 			if (error) {
 				ctx.ui.notify(error, "error");
 			}
@@ -283,10 +405,16 @@ export default function (pi: ExtensionAPI) {
 			"Transfer context to a new focused session. ONLY use this when the user explicitly asks for a handoff. Provide a goal describing what the new session should focus on.",
 		parameters: Type.Object({
 			goal: Type.String({ description: "The goal/task for the new session" }),
+			mode: Type.Optional(Type.String({ description: "Amplike mode name to start the new session with (e.g. 'rush', 'smart', 'deep')" })),
+			model: Type.Optional(Type.String({ description: "Model to start the new session with, as provider/modelId (e.g. 'anthropic/claude-haiku-4-5')" })),
 		}),
 
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-			const error = await performHandoff(pi, ctx, params.goal, pendingHandoff, setPendingHandoff, true);
+			const options: HandoffOptions = {};
+			if (params.mode) options.mode = params.mode;
+			if (params.model) options.model = params.model;
+			const hasOptions = options.mode || options.model;
+			const error = await performHandoff(pi, ctx, params.goal, pendingHandoff, setPendingHandoff, true, hasOptions ? options : undefined);
 			return {
 				content: [{ type: "text", text: error ?? "Handoff initiated. The session will switch after the current turn completes." }],
 			};

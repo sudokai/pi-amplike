@@ -127,13 +127,26 @@ export default function (pi: ExtensionAPI) {
 			const llmMessages = convertToLlm(messages);
 			const conversationText = serializeConversation(llmMessages);
 
-			// Use LLM to answer the question
-			if (!ctx.model) {
+			// Determine the model to use: prefer the queried session's own model,
+			// fall back to the current session's model.
+			let queryModel = ctx.model;
+			const modelChanges = branch.filter(
+				(entry): entry is SessionEntry & { type: "model_change" } => entry.type === "model_change",
+			);
+			if (modelChanges.length > 0) {
+				const lastChange = modelChanges[modelChanges.length - 1]!;
+				const sessionModel = ctx.modelRegistry.find(lastChange.provider, lastChange.modelId);
+				if (sessionModel) {
+					queryModel = sessionModel;
+				}
+			}
+
+			if (!queryModel) {
 				return errorResult("Error: No model available to analyze the session.");
 			}
 
 			try {
-				const apiKey = await ctx.modelRegistry.getApiKey(ctx.model);
+				const apiKey = await ctx.modelRegistry.getApiKey(queryModel);
 
 				const userMessage: Message = {
 					role: "user",
@@ -147,7 +160,7 @@ export default function (pi: ExtensionAPI) {
 				};
 
 				const response = await complete(
-					ctx.model,
+					queryModel,
 					{ systemPrompt: QUERY_SYSTEM_PROMPT, messages: [userMessage] },
 					{ apiKey, signal },
 				);
