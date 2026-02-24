@@ -6,9 +6,9 @@
 
 ### Session Management
 - **Handoff** - Create a new focused session with AI-generated context transfer:
-  - **`/handoff <goal>`** command - Manually create a handoff session
-  - **`handoff` tool** - The agent can invoke this when you explicitly request a handoff
-- **`session_query`** tool - The agent in handed-off sessions automatically gets the ability to query the parent session for context, decisions, or code changes
+  - **`/handoff <goal>`** command - Manually create a handoff session (potentially with `-mode <name>` / `-model <name>` parameter to switch models for the new session)
+  - **`handoff` tool** - The agent can invoke this (with optional `mode`/`model` parameters) when you explicitly request a handoff
+- **`session_query`** tool - The agent in handed-off sessions automatically gets the ability to query the parent session for context, decisions, or code changes; analysis uses the queried session's own model
 - Use `/resume` to switch between and navigate handed-off sessions
 
 ### Prompt Modes
@@ -66,9 +66,15 @@ When your conversation gets long or you want to branch off to a focused task, yo
 **Manual handoff via command:**
 ```
 /handoff now implement this for teams as well
-/handoff execute phase one of the plan
-/handoff check other places that need this fix
+/handoff -mode rush execute phase one of the plan
+/handoff -model anthropic/claude-haiku-4-5 check other places that need this fix
 ```
+
+Optional flags (can be combined):
+- `-mode <name>` — start the new session in a named mode (e.g. `rush`, `smart`, `deep`)
+- `-model <provider/id>` — start the new session with a specific model (e.g. `anthropic/claude-haiku-4-5`)
+
+The handoff summary is always generated with the *current* session's model before switching.
 
 **Agent-invoked handoff:**
 The agent can also initiate a handoff when you explicitly ask for it:
@@ -76,6 +82,8 @@ The agent can also initiate a handoff when you explicitly ask for it:
 "Please hand this off to a new session to implement the fix"
 "Create a handoff session to execute phase one"
 ```
+
+The `handoff` tool also accepts optional `mode` and `model` parameters.
 
 Both methods create a new session with:
 - AI-generated summary of relevant context from the current conversation
@@ -89,7 +97,7 @@ Use Pi's built-in `/resume` command to switch between sessions, including handed
 
 ### Querying Past Sessions
 
-The `session_query` tool lets the model look up information from previous sessions. It's automatically used when a handoff includes parent session reference, but can also be invoked directly:
+The `session_query` tool lets the model look up information from previous sessions. It's automatically used when a handoff includes parent session reference, but can also be invoked directly. The analysis call uses the queried session's own model (falling back to the current model if unavailable):
 
 ```
 session_query("/path/to/session.jsonl", "What files were modified?")
@@ -141,9 +149,9 @@ Notes:
 |-----------|------|-------------|
 | [amp-skills](extensions/amp-skills.ts) | Extension | Adds Amp-compatible skill discovery paths (`~/.config/agents/skills`, `~/.config/amp/skills`, `.agents/skills`) |
 | [permissions](extensions/permissions.ts) | Extension | Reads `amp.commands.allowlist` and `amp.permissions` from `~/.config/amp/settings.json` (and `.agents/settings.json`) and intercepts bash tool calls accordingly; `/permissions` toggles between `enabled` and `yolo` (all commands allowed, status bar indicator, persisted in `~/.pi/agent/amplike.json`) |
-| [handoff](extensions/handoff.ts) | Extension | `/handoff` command + `handoff` tool for AI-powered context transfer |
+| [handoff](extensions/handoff.ts) | Extension | `/handoff [-mode <name>] [-model <provider/id>] <goal>` command + `handoff` tool (with `mode`/`model` params) for AI-powered context transfer |
 | [modes](extensions/modes.ts) | Extension | Prompt mode manager with model/thinking/color presets, editor border overlay, and shortcuts |
-| [session-query](extensions/session-query.ts) | Extension | `session_query` tool for querying parent sessions |
+| [session-query](extensions/session-query.ts) | Extension | `session_query` tool for querying parent sessions; uses the queried session's own model for analysis |
 | [session-query](skills/session-query/) | Skill | Instructions for using the session_query tool |
 | [web-search](skills/web-search/) | Skill | Web search via Jina API |
 | [visit-webpage](skills/visit-webpage/) | Skill | Webpage content extraction |

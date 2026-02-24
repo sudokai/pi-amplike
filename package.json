@@ -1,6 +1,6 @@
 {
   "name": "pi-amplike",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Pi skills and extensions that provide Amp Code-like workflows (handoff, permissions, mode selector, web access).",
   "license": "MIT",
   "homepage": "https://github.com/pasky/pi-amplike",
