@@ -17,6 +17,9 @@
   - **`Ctrl+Shift+S`** - mode selector
   - **`Ctrl+Space`** - cycle modes
 
+### Permissions
+- **`/permissions`** command toggles bash command allow/deny permissions, directly read from AmpCode's configuration files.
+
 ### Web Access
 - **web-search** - Search the web via Jina Search API
 - **visit-webpage** - Extract webpage content as markdown (using Jina API), or download images
