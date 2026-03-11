@@ -397,7 +397,7 @@ export async function runSubagent(
 ): Promise<SingleResult> {
 	const result: SingleResult = {
 		task,
-		exitCode: 0,
+		exitCode: -1,
 		displayItems: [],
 		finalOutput: "",
 		usage: emptyUsage(),
@@ -484,6 +484,8 @@ export async function runSubagent(
 
 		if (result.stopReason === "error" || result.stopReason === "aborted") {
 			result.exitCode = 1;
+		} else if (result.exitCode === -1) {
+			result.exitCode = 0;
 		}
 	} catch (err) {
 		result.exitCode = 1;

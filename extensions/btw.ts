@@ -211,13 +211,15 @@ export default function (pi: ExtensionAPI) {
 
 				// Send fully rendered result as a custom message in the chat.
 				// Filtered out of LLM context by the context event handler above.
+				// triggerTurn: false is critical — without it, sendMessage mid-stream
+				// tries to start a new turn which corrupts conversation state.
 				const icon = result.exitCode === 0 ? "✓" : "✗";
 				pi.sendMessage({
 					customType: BTW_MESSAGE_TYPE,
 					content: [{ type: "text", text: `[btw ${icon}] ${task}` }],
 					display: true,
 					details: { task, result } satisfies BtwMessageDetails,
-				});
+				}, { triggerTurn: false });
 			}).catch((err) => {
 				ctx.ui.setWidget(widgetKey, undefined);
 				ctx.ui.notify(`btw failed: ${err instanceof Error ? err.message : String(err)}`, "error");
