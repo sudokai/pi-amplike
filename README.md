@@ -11,14 +11,18 @@
 - **`session_query`** tool - The agent in handed-off sessions automatically gets the ability to query the parent session for context, decisions, or code changes; analysis uses the queried session's own model
 - Use `/resume` to switch between and navigate handed-off sessions
 
+### Subagents and BTW
+- **`subagent`** tool - The agent can create one or multiple parallel task-focused, non-interactive subagents to save context and speed up work
+- **`/btw <prompt>`** command - Same semantics as in Claude Code, basically a user-triggered subagent running and finishing asynchronously and independently on the main agent
+
+### Permissions
+- **`/permissions`** command toggles bash command allow/deny permissions, directly read from AmpCode's configuration files.
+
 ### Prompt Modes
 - **`/mode`** command with interactive mode selector/configuration UI (a mode is a model + thinking + color preset, active mode is shown in prompt editor border)
 - **Shortcuts**:
   - **`Ctrl+Shift+S`** - mode selector
   - **`Ctrl+Space`** - cycle modes
-
-### Permissions
-- **`/permissions`** command toggles bash command allow/deny permissions, directly read from AmpCode's configuration files.
 
 ### Web Access
 - **web-search** - Search the web via Jina Search API
@@ -94,11 +98,11 @@ Both methods create a new session with:
 - Clear task description based on your goal
 - Reference to parent session (accessible via `session_query` tool)
 
-### Session Navigation
+#### Session Navigation
 
 Use Pi's built-in `/resume` command to switch between sessions, including handed-off sessions. The handoff creates sessions with descriptive names that make them easy to find.
 
-### Querying Past Sessions
+#### Querying Past Sessions
 
 The `session_query` tool lets the model look up information from previous sessions. It's automatically used when a handoff includes parent session reference, but can also be invoked directly. The analysis call uses the queried session's own model (falling back to the current model if unavailable):
 
@@ -106,6 +110,13 @@ The `session_query` tool lets the model look up information from previous sessio
 session_query("/path/to/session.jsonl", "What files were modified?")
 session_query("/path/to/session.jsonl", "What approach was chosen?")
 ```
+
+
+### Subagents
+
+Ask your agent to "use subagents to ..." whenever you know you have a context-hungry task ahead that you would like to run isolated from the main context window.
+
+When your agent is working on something and you suddenly got a question, use `/btw` to ask it. Of course, you can even ask multiple questions in parallel. The `/btw` subagent is ephemeral like tool subagents, but unlike tool subagents it sees the full contxt of your session (besides the fact that it can also use tools to read files).
 
 ### Permissions
 
