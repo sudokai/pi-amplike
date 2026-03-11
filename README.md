@@ -2,6 +2,10 @@
 
 [Pi](https://github.com/badlogic/pi-mono) skills and extensions that give Pi similar capabilities to [Amp Code](https://ampcode.com/) out of the box.
 
+<p align="center">
+<img src="demo.gif" alt="Pi subagents and /btw in action" width="700" />
+</p>
+
 ## Features
 
 ### Session Management
