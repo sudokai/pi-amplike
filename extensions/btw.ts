@@ -14,19 +14,24 @@
 
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, SessionEntry } from "@mariozechner/pi-coding-agent";
 import {
+	convertToLlm,
 	createBashTool,
 	createEditTool,
 	createReadTool,
 	createWriteTool,
+	getMarkdownTheme,
+	serializeConversation,
 } from "@mariozechner/pi-coding-agent";
+import { Box, Markdown, Spacer, Text } from "@mariozechner/pi-tui";
 
 import { resolveModelAndThinking } from "./lib/mode-utils.js";
 import {
 	type SingleResult,
+	formatToolCall,
+	formatUsage,
 	renderProgressPlainLines,
-	renderResults,
 	runSubagent,
 } from "./lib/subagent-core.js";
 
@@ -45,6 +50,8 @@ interface BtwMessageDetails {
 // Extension
 // ---------------------------------------------------------------------------
 
+let btwCounter = 0;
+
 export default function (pi: ExtensionAPI) {
 	// --- Filter btw messages out of LLM context (user-facing only) ---
 	pi.on("context", (event) => {
@@ -56,12 +63,50 @@ export default function (pi: ExtensionAPI) {
 		}
 	});
 
-	// --- Custom message renderer: delegates to the same renderResults as subagent ---
-	pi.registerMessageRenderer<BtwMessageDetails>(BTW_MESSAGE_TYPE, (message, { expanded }, theme) => {
+	// --- Custom message renderer: always shows full markdown output ---
+	pi.registerMessageRenderer<BtwMessageDetails>(BTW_MESSAGE_TYPE, (message, _opts, theme) => {
 		const details = message.details;
 		if (!details?.result) return undefined;
 
-		return renderResults([details.result], { expanded, label: "btw" }, theme);
+		const r = details.result;
+		const icon = r.exitCode === 0
+			? theme.fg("success", "✓")
+			: theme.fg("error", "✗");
+
+		const box = new Box(1, 1, (t) => theme.bg("customMessageBg", t));
+
+		// Single merged header: ✓ btw: <task>
+		box.addChild(
+			new Text(`${icon} ${theme.fg("toolTitle", theme.bold("btw: "))}${theme.fg("dim", r.task)}`, 0, 0),
+		);
+
+		if (r.exitCode > 0 && r.errorMessage) {
+			box.addChild(new Text(theme.fg("error", `Error: ${r.errorMessage}`), 0, 0));
+		}
+
+		// Tool calls
+		for (const item of r.displayItems) {
+			if (item.type === "toolCall") {
+				box.addChild(new Text(
+					theme.fg("muted", "→ ") +
+						formatToolCall(item.name, item.args, theme.fg.bind(theme)),
+					0, 0,
+				));
+			}
+		}
+
+		// Markdown output
+		if (r.finalOutput) {
+			const mdTheme = getMarkdownTheme();
+			box.addChild(new Spacer(1));
+			box.addChild(new Markdown(r.finalOutput.trim(), 0, 0, mdTheme));
+		}
+
+		// Usage
+		const usageStr = formatUsage(r.usage, r.model);
+		if (usageStr) box.addChild(new Text(theme.fg("dim", usageStr), 0, 0));
+
+		return box;
 	});
 
 	// --- /btw command ---
@@ -123,14 +168,31 @@ export default function (pi: ExtensionAPI) {
 				return ctx.modelRegistry.getApiKey(targetModel!);
 			};
 
+			// Serialize current conversation context for the subagent
+			const branch = ctx.sessionManager.getBranch();
+			const messages = branch
+				.filter((entry): entry is SessionEntry & { type: "message" } => entry.type === "message")
+				.map((entry) => entry.message);
+			const conversationContext = messages.length > 0
+				? serializeConversation(convertToLlm(messages))
+				: "";
+
+			// Build enriched task with conversation context
+			const taskWithContext = conversationContext
+				? `## Conversation Context\n\n${conversationContext}\n\n## Task\n\n${task}`
+				: task;
+
+			// Unique widget key per invocation so multiple /btw's don't clobber each other
+			const widgetKey = `btw-${++btwCounter}`;
+
 			// Show initial status widget
 			const taskPreview = task.length > 50 ? `${task.slice(0, 50)}...` : task;
-			ctx.ui.setWidget("btw", [`⏳ btw: ${taskPreview}`], { placement: "aboveEditor" });
+			ctx.ui.setWidget(widgetKey, [`⏳ btw: ${taskPreview}`], { placement: "aboveEditor" });
 
 			// Fire and forget — run in background, update widget on progress
 			runSubagent(
 				systemPrompt,
-				task,
+				taskWithContext,
 				tools,
 				targetModel,
 				thinkingLevel,
@@ -138,11 +200,14 @@ export default function (pi: ExtensionAPI) {
 				undefined, // no abort signal — runs to completion
 				(progressResult) => {
 					// Update widget with live tool call feed
-					ctx.ui.setWidget("btw", renderProgressPlainLines(task, progressResult), { placement: "aboveEditor" });
+					ctx.ui.setWidget(widgetKey, renderProgressPlainLines(task, progressResult), { placement: "aboveEditor" });
 				},
 			).then((result) => {
 				// Remove progress widget
-				ctx.ui.setWidget("btw", undefined);
+				ctx.ui.setWidget(widgetKey, undefined);
+
+				// Override result.task with the short user prompt (not the context-enriched one)
+				result.task = task;
 
 				// Send fully rendered result as a custom message in the chat.
 				// Filtered out of LLM context by the context event handler above.
@@ -154,7 +219,7 @@ export default function (pi: ExtensionAPI) {
 					details: { task, result } satisfies BtwMessageDetails,
 				});
 			}).catch((err) => {
-				ctx.ui.setWidget("btw", undefined);
+				ctx.ui.setWidget(widgetKey, undefined);
 				ctx.ui.notify(`btw failed: ${err instanceof Error ? err.message : String(err)}`, "error");
 			});
 
