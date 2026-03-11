@@ -21,7 +21,9 @@ import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext, SessionEn
 import { BorderedLoader, convertToLlm, serializeConversation } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 
-const SYSTEM_PROMPT = `You are a context transfer assistant. Given a conversation history and the user's goal for a new thread, generate a focused prompt that:
+import { loadModeSpec } from "./lib/mode-utils.js";
+
+const CONTEXT_SUMMARY_SYSTEM_PROMPT = `You are a context transfer assistant. Given a conversation history and the user's goal for a new thread, generate a focused prompt that:
 
 1. Summarizes relevant context from the conversation (decisions made, approaches taken, key findings)
 2. Lists any relevant files that were discussed or modified
@@ -43,57 +45,52 @@ Files involved:
 ## Task
 [Clear description of what to do next based on user's goal]`;
 
+/**
+ * Generate a context summary by asking an LLM to distill the conversation
+ * into a focused prompt for a new session.
+ *
+ * @returns The generated summary text, or null if aborted.
+ */
+async function generateContextSummary(
+	model: any,
+	apiKey: string,
+	messages: AgentMessage[],
+	goal: string,
+	signal?: AbortSignal,
+): Promise<string | null> {
+	const conversationText = serializeConversation(convertToLlm(messages));
+
+	const userMessage: Message = {
+		role: "user",
+		content: [
+			{
+				type: "text",
+				text: `## Conversation History\n\n${conversationText}\n\n## User's Goal for New Thread\n\n${goal}`,
+			},
+		],
+		timestamp: Date.now(),
+	};
+
+	const response = await complete(
+		model,
+		{ systemPrompt: CONTEXT_SUMMARY_SYSTEM_PROMPT, messages: [userMessage] },
+		{ apiKey, signal },
+	);
+
+	if (response.stopReason === "aborted") {
+		return null;
+	}
+
+	return response.content
+		.filter((c): c is { type: "text"; text: string } => c.type === "text")
+		.map((c) => c.text)
+		.join("\n");
+}
+
 type HandoffOptions = {
 	mode?: string;
 	model?: string;
 };
-
-/**
- * Load a mode spec from modes.json by name.
- * Returns the spec if found, or undefined.
- */
-async function loadModeSpec(
-	cwd: string,
-	modeName: string,
-): Promise<{ provider?: string; modelId?: string; thinkingLevel?: string } | undefined> {
-	const fsModule = await import("node:fs");
-	const pathModule = await import("node:path");
-	const osModule = await import("node:os");
-
-	const expandUser = (p: string) => {
-		if (p === "~") return osModule.homedir();
-		if (p.startsWith("~/")) return pathModule.join(osModule.homedir(), p.slice(2));
-		return p;
-	};
-
-	const agentDir = process.env.PI_CODING_AGENT_DIR
-		? expandUser(process.env.PI_CODING_AGENT_DIR)
-		: pathModule.join(osModule.homedir(), ".pi", "agent");
-
-	// Check project modes first, then global
-	const candidates = [
-		pathModule.join(cwd, ".pi", "modes.json"),
-		pathModule.join(agentDir, "modes.json"),
-	];
-
-	for (const modesPath of candidates) {
-		try {
-			const raw = fsModule.readFileSync(modesPath, "utf8");
-			const parsed = JSON.parse(raw);
-			if (parsed.modes && typeof parsed.modes === "object" && parsed.modes[modeName]) {
-				const spec = parsed.modes[modeName];
-				return {
-					provider: typeof spec.provider === "string" ? spec.provider : undefined,
-					modelId: typeof spec.modelId === "string" ? spec.modelId : undefined,
-					thinkingLevel: typeof spec.thinkingLevel === "string" ? spec.thinkingLevel : undefined,
-				};
-			}
-		} catch {
-			continue;
-		}
-	}
-	return undefined;
-}
 
 /**
  * Apply -mode and -model options after a session switch.
@@ -174,8 +171,6 @@ async function performHandoff(
 		return "No conversation to hand off.";
 	}
 
-	const llmMessages = convertToLlm(messages);
-	const conversationText = serializeConversation(llmMessages);
 	const currentSessionFile = ctx.sessionManager.getSessionFile();
 
 	// Generate the handoff prompt with loader UI
@@ -185,32 +180,7 @@ async function performHandoff(
 
 		const doGenerate = async () => {
 			const apiKey = await ctx.modelRegistry.getApiKey(ctx.model!);
-
-			const userMessage: Message = {
-				role: "user",
-				content: [
-					{
-						type: "text",
-						text: `## Conversation History\n\n${conversationText}\n\n## User's Goal for New Thread\n\n${goal}`,
-					},
-				],
-				timestamp: Date.now(),
-			};
-
-			const response = await complete(
-				ctx.model!,
-				{ systemPrompt: SYSTEM_PROMPT, messages: [userMessage] },
-				{ apiKey, signal: loader.signal },
-			);
-
-			if (response.stopReason === "aborted") {
-				return null;
-			}
-
-			return response.content
-				.filter((c): c is { type: "text"; text: string } => c.type === "text")
-				.map((c) => c.text)
-				.join("\n");
+			return generateContextSummary(ctx.model!, apiKey, messages, goal, loader.signal);
 		};
 
 		doGenerate()
