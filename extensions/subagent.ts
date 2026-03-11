@@ -42,7 +42,6 @@ import {
 // Constants
 // ---------------------------------------------------------------------------
 
-const MAX_PARALLEL_TASKS = 8;
 const MAX_CONCURRENCY = 4;
 
 // ---------------------------------------------------------------------------
@@ -72,13 +71,6 @@ export default function (pi: ExtensionAPI) {
 			if (!params.tasks || params.tasks.length === 0) {
 				return {
 					content: [{ type: "text", text: "Provide at least one task." }],
-					details: { results: [] },
-				};
-			}
-
-			if (params.tasks.length > MAX_PARALLEL_TASKS) {
-				return {
-					content: [{ type: "text", text: `Too many tasks (${params.tasks.length}). Max is ${MAX_PARALLEL_TASKS}.` }],
 					details: { results: [] },
 				};
 			}
