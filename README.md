@@ -43,20 +43,24 @@
 ### Option A: Install from npm (recommended)
 
 ```bash
-mkdir -p ~/.pi/packages
-cd ~/.pi/packages
-npm install pi-amplike
+pi install npm:pi-amplike
 ```
 
-This creates `~/.pi/packages/node_modules/pi-amplike`. Pi will pick it up as a package automatically.
-
 ### Option B: Install from git
+
+```bash
+pi install https://github.com/pasky/pi-amplike
+```
+
+### Option C: Local development
 
 ```bash
 git clone https://github.com/pasky/pi-amplike ~/.pi/packages/pi-amplike
 cd ~/.pi/packages/pi-amplike
 npm install
 ```
+
+Then add `"packages/pi-amplike"` to the `"packages"` array in `~/.pi/agent/settings.json`.
 
 ## Setup
 
