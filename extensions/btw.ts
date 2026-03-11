@@ -53,6 +53,16 @@ interface BtwMessageDetails {
 let btwCounter = 0;
 
 export default function (pi: ExtensionAPI) {
+	// Track btw widgets waiting for turn_end to remove themselves
+	const pendingWidgetRemovals = new Map<string, () => void>();
+
+	pi.on("turn_end", () => {
+		// Resolve all pending widget removal promises — the steered custom
+		// messages render at turn boundary, so widgets can now be removed.
+		for (const [, resolve] of pendingWidgetRemovals) resolve();
+		pendingWidgetRemovals.clear();
+	});
+
 	// --- Filter btw messages out of LLM context (user-facing only) ---
 	pi.on("context", (event) => {
 		const filtered = event.messages.filter(
@@ -63,17 +73,13 @@ export default function (pi: ExtensionAPI) {
 		}
 	});
 
-	// --- Custom message renderer: always shows full markdown output ---
-	pi.registerMessageRenderer<BtwMessageDetails>(BTW_MESSAGE_TYPE, (message, _opts, theme) => {
-		const details = message.details;
-		if (!details?.result) return undefined;
-
-		const r = details.result;
+	// --- Shared rendering logic for btw results ---
+	function renderBtwResult(r: SingleResult, theme: any): InstanceType<typeof Box> {
 		const icon = r.exitCode === 0
 			? theme.fg("success", "✓")
 			: theme.fg("error", "✗");
 
-		const box = new Box(1, 1, (t) => theme.bg("customMessageBg", t));
+		const box = new Box(1, 1, (t: string) => theme.bg("customMessageBg", t));
 
 		// Single merged header: ✓ btw: <task>
 		box.addChild(
@@ -107,6 +113,13 @@ export default function (pi: ExtensionAPI) {
 		if (usageStr) box.addChild(new Text(theme.fg("dim", usageStr), 0, 0));
 
 		return box;
+	}
+
+	// --- Custom message renderer: always shows full markdown output ---
+	pi.registerMessageRenderer<BtwMessageDetails>(BTW_MESSAGE_TYPE, (message, _opts, theme) => {
+		const details = message.details;
+		if (!details?.result) return undefined;
+		return renderBtwResult(details.result, theme);
 	});
 
 	// --- /btw command ---
@@ -202,10 +215,7 @@ export default function (pi: ExtensionAPI) {
 					// Update widget with live tool call feed
 					ctx.ui.setWidget(widgetKey, renderProgressPlainLines(task, progressResult), { placement: "aboveEditor" });
 				},
-			).then((result) => {
-				// Remove progress widget
-				ctx.ui.setWidget(widgetKey, undefined);
-
+			).then(async (result) => {
 				// Override result.task with the short user prompt (not the context-enriched one)
 				result.task = task;
 
@@ -220,6 +230,19 @@ export default function (pi: ExtensionAPI) {
 					display: true,
 					details: { task, result } satisfies BtwMessageDetails,
 				}, { triggerTurn: false });
+
+				// If the agent is busy (tool call running), the custom message won't
+				// render in chat until the turn ends.  Show the full rendered result
+				// as a component widget so it appears immediately; remove once idle.
+				if (!ctx.isIdle()) {
+					ctx.ui.setWidget(widgetKey, (_tui, theme) => renderBtwResult(result, theme), { placement: "aboveEditor" });
+					// Wait for current turn to end — the steered custom message
+					// renders at that point, so we can remove the widget.
+					await new Promise<void>((resolve) => {
+						pendingWidgetRemovals.set(widgetKey, resolve);
+					});
+				}
+				ctx.ui.setWidget(widgetKey, undefined);
 			}).catch((err) => {
 				ctx.ui.setWidget(widgetKey, undefined);
 				ctx.ui.notify(`btw failed: ${err instanceof Error ? err.message : String(err)}`, "error");
