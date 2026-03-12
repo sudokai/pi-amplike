@@ -154,8 +154,7 @@ export default function (pi: ExtensionAPI) {
 			const successCount = results.filter((r) => r.exitCode === 0).length;
 			const failCount = results.length - successCount;
 			const summaries = results.map((r) => {
-				const preview = r.finalOutput.slice(0, 200) + (r.finalOutput.length > 200 ? "..." : "");
-				return `[${r.exitCode === 0 ? "✓" : "✗"}] ${preview || "(no output)"}`;
+				return `[${r.exitCode === 0 ? "✓" : "✗"}] ${r.finalOutput || "(no output)"}`;
 			});
 
 			const isError = results.length === 1 ? results[0].exitCode !== 0 : failCount === results.length;
