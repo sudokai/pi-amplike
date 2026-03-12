@@ -64,7 +64,8 @@ export default function (pi: ExtensionAPI) {
 			"Run isolated subagents with built-in tools (read, write, edit, bash).",
 			"Subagents have two benefits - quickly perform parallel tasks, and save space in your context window.",
 			"Subagents are suitable for independent, well-defined, context-hungry subtasks that don't need back-and-forth with the user, such as research or refactoring.",
-			"The downside is they are non-interactive for the user; use them only when explicitly asked or when you can show that the benefits are situationally very strong."
+			"The downside is they are non-interactive for the user; use them only when explicitly asked or when your reasoning confirms that the benefits are situationally *strong*.",
+			"(Example of useless subagent: 'run A B C D exactly and provide all file contents and command outputs')"
 		].join(" "),
 		parameters: SubagentParams,
 
