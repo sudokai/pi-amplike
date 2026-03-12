@@ -124,7 +124,7 @@ export default function (pi: ExtensionAPI) {
 
 	// --- /btw command ---
 	pi.registerCommand("btw", {
-		description: "Run a subagent in the background (-mode <name>, -model <provider/id>)",
+		description: "Run a single-shot subagent in the background (-mode <name>, -model <provider/id>)",
 		handler: async (args, ctx) => {
 			// Parse optional -mode and -model flags
 			let remaining = args;
@@ -192,7 +192,7 @@ export default function (pi: ExtensionAPI) {
 
 			// Build enriched task with conversation context
 			const taskWithContext = conversationContext
-				? `## Conversation Context\n\n${conversationContext}\n\n## Task\n\n${task}`
+				? `## Conversation Context\n\n${conversationContext}\n\n## Task or question (FOCUS SOLELY ON THIS)\n\n${task}`
 				: task;
 
 			// Unique widget key per invocation so multiple /btw's don't clobber each other
