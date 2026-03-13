@@ -336,8 +336,16 @@ export function renderResults(
  * Render a result as plain-text lines (no theme colors).
  * Used for setWidget() which only supports string[].
  */
+export function btwTaskPreview(task: string): string {
+	const taskFirstLine = task.split("\n")[0];
+	const taskMultiline = taskFirstLine.length < task.length;
+	const maxLen = (process.stdout.columns ?? 120) - "⏳ btw: ".length - 3 - 5;
+	const taskTrimmed = taskFirstLine.length > maxLen ? `${taskFirstLine.slice(0, maxLen)}...` : taskFirstLine;
+	return taskMultiline && !taskTrimmed.endsWith("...") ? `${taskTrimmed}...` : taskTrimmed;
+}
+
 export function renderProgressPlainLines(task: string, result: SingleResult): string[] {
-	const taskPreview = task.length > 60 ? `${task.slice(0, 60)}...` : task;
+	const taskPreview = btwTaskPreview(task);
 	const lines: string[] = [];
 
 	lines.push(`⏳ btw: ${taskPreview}`);

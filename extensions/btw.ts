@@ -31,6 +31,7 @@ import {
 	type SingleResult,
 	formatToolCall,
 	formatUsage,
+	btwTaskPreview,
 	renderProgressPlainLines,
 	runSubagent,
 } from "./lib/subagent-core.js";
@@ -199,7 +200,7 @@ export default function (pi: ExtensionAPI) {
 			const widgetKey = `btw-${++btwCounter}`;
 
 			// Show initial status widget
-			const taskPreview = task.length > 50 ? `${task.slice(0, 50)}...` : task;
+			const taskPreview = btwTaskPreview(task);
 			ctx.ui.setWidget(widgetKey, [`⏳ btw: ${taskPreview}`], { placement: "aboveEditor" });
 
 			// Fire and forget — run in background, update widget on progress
