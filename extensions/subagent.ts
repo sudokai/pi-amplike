@@ -119,6 +119,12 @@ export default function (pi: ExtensionAPI) {
 				usage: emptyUsage(),
 			}));
 
+			// Emit immediately so renderResult is shown from the start (hiding the renderCall block)
+			onUpdate?.({
+				content: [{ type: "text", text: "(running...)" }],
+				details: makeDetails([...allResults]),
+			});
+
 			const emitUpdate = () => {
 				if (!onUpdate) return;
 				const done = allResults.filter((r) => r.exitCode !== -1).length;
@@ -167,25 +173,9 @@ export default function (pi: ExtensionAPI) {
 
 		// --- Rendering ---
 
-		renderCall(args, theme) {
-			const tasks: string[] = args.tasks ?? [];
-			let text = theme.fg("toolTitle", theme.bold("subagent "));
-			if (args.mode) text += theme.fg("muted", `[${args.mode}] `);
-			else if (args.model) text += theme.fg("muted", `[${args.model}] `);
-
-			if (tasks.length <= 1) {
-				const task = tasks[0] ?? "...";
-				// Single line — no truncation, let terminal wrap naturally
-				text += theme.fg("dim", task);
-			} else {
-				text += theme.fg("accent", `${tasks.length} tasks`);
-				for (const t of tasks.slice(0, 3)) {
-					text += `\n  ${theme.fg("dim", t)}`;
-				}
-				if (tasks.length > 3) text += `\n  ${theme.fg("muted", `... +${tasks.length - 3} more`)}`;
-			}
-			return new Text(text, 0, 0);
-		},
+		// renderCall intentionally omitted: we emit an initial onUpdate immediately so
+		// renderResult is shown from the very start of execution. This avoids the
+		// call block and result block both repeating the task description.
 
 		renderResult(result, { expanded }, theme) {
 			const details = result.details as SubagentDetails | undefined;
