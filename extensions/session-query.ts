@@ -18,6 +18,7 @@ import {
 	type SessionEntry,
 } from "@mariozechner/pi-coding-agent";
 import { Container, Markdown, Spacer, Text } from "@mariozechner/pi-tui";
+
 import { Type } from "@sinclair/typebox";
 
 const QUERY_SYSTEM_PROMPT = `You are a session context assistant. Given the conversation history from a pi coding session and a question, provide a concise answer based on the session contents.
@@ -146,7 +147,11 @@ export default function (pi: ExtensionAPI) {
 			}
 
 			try {
-				const apiKey = await ctx.modelRegistry.getApiKey(queryModel);
+				const auth = await ctx.modelRegistry.getApiKeyAndHeaders(queryModel);
+				if (!auth.ok) {
+					return errorResult(`Error: ${auth.error}`);
+				}
+				const { apiKey, headers } = auth;
 
 				const userMessage: Message = {
 					role: "user",
@@ -162,7 +167,7 @@ export default function (pi: ExtensionAPI) {
 				const response = await complete(
 					queryModel,
 					{ systemPrompt: QUERY_SYSTEM_PROMPT, messages: [userMessage] },
-					{ apiKey, signal },
+					{ apiKey, headers, signal },
 				);
 
 				if (response.stopReason === "aborted") {

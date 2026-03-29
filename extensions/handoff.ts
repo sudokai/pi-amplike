@@ -53,7 +53,8 @@ Files involved:
  */
 async function generateContextSummary(
 	model: any,
-	apiKey: string,
+	apiKey: string | undefined,
+	headers: Record<string, string> | undefined,
 	messages: AgentMessage[],
 	goal: string,
 	signal?: AbortSignal,
@@ -74,7 +75,7 @@ async function generateContextSummary(
 	const response = await complete(
 		model,
 		{ systemPrompt: CONTEXT_SUMMARY_SYSTEM_PROMPT, messages: [userMessage] },
-		{ apiKey, signal },
+		{ apiKey, headers, signal },
 	);
 
 	if (response.stopReason === "aborted") {
@@ -179,8 +180,9 @@ async function performHandoff(
 		loader.onAbort = () => done(null);
 
 		const doGenerate = async () => {
-			const apiKey = await ctx.modelRegistry.getApiKey(ctx.model!);
-			return generateContextSummary(ctx.model!, apiKey, messages, goal, loader.signal);
+			const auth = await ctx.modelRegistry.getApiKeyAndHeaders(ctx.model!);
+			if (!auth.ok) return null;
+			return generateContextSummary(ctx.model!, auth.apiKey, auth.headers, messages, goal, loader.signal);
 		};
 
 		doGenerate()

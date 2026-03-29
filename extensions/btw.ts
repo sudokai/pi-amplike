@@ -179,7 +179,8 @@ export default function (pi: ExtensionAPI) {
 
 			const systemPrompt = ctx.getSystemPrompt();
 			const apiKeyResolver = async (_provider: string) => {
-				return ctx.modelRegistry.getApiKey(targetModel!);
+				const auth = await ctx.modelRegistry.getApiKeyAndHeaders(targetModel!);
+				return auth.ok ? auth.apiKey : undefined;
 			};
 
 			// Serialize current conversation context for the subagent
