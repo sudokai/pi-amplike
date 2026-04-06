@@ -19,6 +19,7 @@
 import { complete, type Message } from "@mariozechner/pi-ai";
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext, SessionEntry } from "@mariozechner/pi-coding-agent";
 import { BorderedLoader, convertToLlm, serializeConversation } from "@mariozechner/pi-coding-agent";
+import { Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 
 import { loadModeSpec } from "./lib/mode-utils.js";
@@ -437,6 +438,30 @@ export default function (pi: ExtensionAPI) {
 			return {
 				content: [{ type: "text", text: error ?? "Handoff initiated. The session will switch after the current turn completes." }],
 			};
+		},
+
+		renderCall(args, theme) {
+			const parts: string[] = [];
+
+			// Goal: show first ~5 lines, truncated
+			const goal = (args.goal as string) ?? "";
+			const goalLines = goal.split("\n");
+			const truncatedGoal = goalLines.length > 5
+				? goalLines.slice(0, 5).join("\n") + "\n" + theme.fg("dim", `… (${goalLines.length - 5} more lines)`)
+				: goal;
+
+			parts.push(theme.fg("toolTitle", theme.bold("Handoff ")));
+
+			if (args.mode) {
+				parts.push(theme.fg("accent", `-mode ${args.mode} `));
+			}
+			if (args.model) {
+				parts.push(theme.fg("accent", `-model ${args.model} `));
+			}
+
+			parts.push(theme.fg("muted", truncatedGoal));
+
+			return new Text(parts.join(""), 0, 0);
 		},
 	});
 }
