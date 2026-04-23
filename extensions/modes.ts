@@ -620,8 +620,7 @@ function isSimpleModeColor(value: string): value is SimpleModeColor {
 	return (SIMPLE_MODE_COLORS as readonly string[]).includes(value);
 }
 
-function getModeBorderColor(ctx: ExtensionContext, pi: ExtensionAPI, mode: string): (text: string) => string {
-	const theme = ctx.ui.theme;
+function getModeBorderColor(theme: any, pi: ExtensionAPI, mode: string): (text: string) => string {
 	const spec = runtime.data.modes[mode];
 	if (spec?.color) {
 		if (isSimpleModeColor(spec.color)) {
@@ -637,7 +636,12 @@ function getModeBorderColor(ctx: ExtensionContext, pi: ExtensionAPI, mode: strin
 		}
 	}
 	// Mirrors Pi's configured thinking border mapping (thinkingOff/thinkingLow/... theme tokens).
-	return theme.getThinkingBorderColor(pi.getThinkingLevel());
+	// pi.getThinkingLevel() is safe on stale extension instances (no ctx access).
+	try {
+		return theme.getThinkingBorderColor(pi.getThinkingLevel());
+	} catch {
+		return (text: string) => text;
+	}
 }
 
 function formatModeLabel(mode: string): string {
@@ -731,26 +735,39 @@ function applyEditor(pi: ExtensionAPI, ctx: ExtensionContext): void {
 		return;
 	}
 
+	// Capture theme up front so the editor's render path (which may fire after
+	// session replacement has invalidated `ctx`/`pi`) doesn't touch a stale
+	// ExtensionContext. Accessing ctx.ui on a stale runner throws
+	// "This extension instance is stale after session replacement or reload."
+	const capturedTheme = ctx.ui.theme;
 	ctx.ui.setEditorComponent((tui, _theme, keybindings) => {
 		const editor = new ModePromptEditor(tui, _theme, keybindings);
 		requestEditorRender = () => editor.requestRenderNow();
 		editor.modeLabelProvider = () => runtime.currentMode;
-		editor.modeLabelColor = (text: string) => ctx.ui.theme.fg("dim", text);
+		editor.modeLabelColor = (text: string) => capturedTheme.fg("dim", text);
 
 		editor.getSelectionSnapshot = () => {
-			const s = getCurrentSelectionSpec(pi, ctx);
-			return `${s.provider ?? ""}/${s.modelId ?? ""}:${s.thinkingLevel ?? ""}`;
+			try {
+				const s = getCurrentSelectionSpec(pi, ctx);
+				return `${s.provider ?? ""}/${s.modelId ?? ""}:${s.thinkingLevel ?? ""}`;
+			} catch {
+				return "";
+			}
 		};
 		editor.onSelectionChanged = () => {
-			void syncModeFromCurrentSelection(pi, ctx);
+			try {
+				void syncModeFromCurrentSelection(pi, ctx);
+			} catch {
+				// ctx stale after session replacement; next session_start re-registers.
+			}
 		};
 
 		const borderColor = (text: string) => {
 			const isBashMode = editor.getText().trimStart().startsWith("!");
 			if (isBashMode) {
-				return ctx.ui.theme.getBashModeBorderColor()(text);
+				return capturedTheme.getBashModeBorderColor()(text);
 			}
-			return getModeBorderColor(ctx, pi, runtime.currentMode)(text);
+			return getModeBorderColor(capturedTheme, pi, runtime.currentMode)(text);
 		};
 
 		editor.borderColor = borderColor;
