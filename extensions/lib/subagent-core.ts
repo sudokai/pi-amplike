@@ -416,22 +416,6 @@ const SETTLE_MS = 150;
 // comfortably exceed that internal 100ms.
 const CONTINUE_GRACE_MS = 700;
 
-// Warn (once per process) if AgentSession's internal event queue can no longer be
-// drained — the barrier still works via polling, but loses some tightness.
-let _warnedDrainUnavailable = false;
-function warnDrainUnavailableOnce(): void {
-	if (_warnedDrainUnavailable) return;
-	_warnedDrainUnavailable = true;
-	try {
-		process.stderr.write(
-			"[pi-amplike subagent] AgentSession._agentEventQueue unavailable; " +
-				"completion barrier falling back to polling only (pi internals may have changed).\n",
-		);
-	} catch {
-		/* ignore */
-	}
-}
-
 /**
  * A `bash` tool that enforces amp permissions before executing. Subagents have
  * no UI, so anything that isn't auto-`allow`ed (i.e. `ask`/`deny`/`reject`) is
@@ -493,11 +477,9 @@ export interface SettleController {
  *    with `graceMs`.
  *
  * `isBusy()` reports session-level busy flags only (NOT pendingContinue).
- * `drain()` optionally flushes the session's async event queue before judging.
  */
 export function createSettleController(opts: {
 	isBusy: () => boolean;
-	drain?: () => Promise<void>;
 	settleMs?: number;
 	graceMs?: number;
 }): SettleController {
@@ -523,16 +505,7 @@ export function createSettleController(opts: {
 	const arm = () => {
 		if (disposed) return;
 		if (settleTimer) clearTimeout(settleTimer);
-		settleTimer = setTimeout(async () => {
-			// A throwing/rejecting drain must not strand `done` or surface as an
-			// unhandled rejection — treat it as "drained" and judge on flags.
-			if (opts.drain) {
-				try {
-					await opts.drain();
-				} catch {
-					/* best-effort */
-				}
-			}
+		settleTimer = setTimeout(() => {
 			if (disposed) return;
 			if (busy()) arm();
 			else resolveDone();
@@ -750,27 +723,6 @@ export async function runSubagent(opts: RunSubagentOptions): Promise<SingleResul
 			}
 		};
 
-		// AgentSession processes agent events through an async queue
-		// (`_agentEventQueue`); `isStreaming` flips synchronously but our subscriber
-		// and `isCompacting` (set during event processing) can lag. Draining it
-		// before judging idle materializes a just-finished turn's compaction trigger.
-		//
-		// This reaches into a private field. It degrades safely: if the field is
-		// renamed/removed we no-op (and warn once), and the poll + pendingContinue
-		// logic still detect completion — just slightly less tightly.
-		const drainQueue = async () => {
-			try {
-				const q = (session as any)?._agentEventQueue;
-				if (q && typeof q.then === "function") {
-					await q;
-				} else {
-					warnDrainUnavailableOnce();
-				}
-			} catch {
-				/* best-effort */
-			}
-		};
-
 		// Completion barrier — see createSettleController. prompt() resolves before
 		// overflow compaction+retry finishes, and isStreaming flips silently, so we
 		// poll session flags + hold pendingContinue across the continue gap.
@@ -782,7 +734,6 @@ export async function runSubagent(opts: RunSubagentOptions): Promise<SingleResul
 				session.pendingMessageCount > 0 ||
 				session.isBashRunning ||
 				session.hasPendingBashMessages,
-			drain: drainQueue,
 		});
 
 		unsubscribe = session.subscribe((event: any) => {
@@ -839,7 +790,6 @@ export async function runSubagent(opts: RunSubagentOptions): Promise<SingleResul
 		await session.prompt(subagentTask, { source: "extension" });
 		settle.kick();
 		await settle.done;
-		await drainQueue();
 
 		// Read authoritative final state from the session (our subscriber capture
 		// can lag the async event queue).

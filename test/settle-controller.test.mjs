@@ -34,7 +34,7 @@ async function scenario(name, script, opts = {}) {
 	const settleMs = opts.settleMs ?? 40;
 	const graceMs = opts.graceMs ?? 120;
 	const busyRef = { v: false };
-	const c = createSettleController({ isBusy: () => busyRef.v, settleMs, graceMs, drain: opts.drain });
+	const c = createSettleController({ isBusy: () => busyRef.v, settleMs, graceMs });
 	let resolved = false;
 	c.done.then(() => {
 		resolved = true;
@@ -94,17 +94,6 @@ await scenario(
 		{ at: 260, assertResolved: true }, // grace + settle expired
 	],
 	{ settleMs: 40, graceMs: 120 },
-);
-
-// 4. A rejecting drain must not strand `done`.
-await scenario(
-	"rejecting-drain",
-	[
-		{ at: 0, busy: true, event: { type: "agent_start" } },
-		{ at: 20, busy: false, kick: true },
-		{ at: 130, assertResolved: true },
-	],
-	{ settleMs: 40, graceMs: 120, drain: async () => { throw new Error("drain boom"); } },
 );
 
 console.log(failures === 0 ? "\nALL PASS" : `\n${failures} FAILURE(S)`);
