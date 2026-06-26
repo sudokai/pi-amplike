@@ -1,26 +1,14 @@
 /**
- * Subagent extension - run in-process subagents with summarized context.
+ * Subagent extension - run isolated subagents over a full AgentSession.
  *
- * Instead of trying to reuse the main agent's exact tools and message prefix
- * (which is fragile and can't include extension tools), the subagent:
- * 1. Generates a context summary (same mechanism as handoff) that distills
- *    the conversation into focused context for the task
- * 2. Starts a fresh agent loop with its own tools (the 4 built-in tools)
- *    and the summary as the initial user message
- *
- * This is simpler, more robust, and naturally supports all the context the
- * subagent needs without worrying about tool set matching or cache alignment.
+ * Each subagent gets its own persisted, in-process AgentSession (see
+ * runSubagent in lib/subagent-core.ts) with the four built-in tools and no
+ * extensions loaded (for isolation). AgentSession provides context compaction,
+ * overflow recovery, and auto-retry. The task text is passed as the sole user
+ * message; there is no shared conversation history.
  */
 
-import type { AgentTool } from "@mariozechner/pi-agent-core";
-
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import {
-	createBashTool,
-	createEditTool,
-	createReadTool,
-	createWriteTool,
-} from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
 import { Type } from "typebox";
 
@@ -89,23 +77,6 @@ export default function (pi: ExtensionAPI) {
 				};
 			}
 
-			// --- Build tools: fresh built-in tools only ---
-			const tools: AgentTool<any>[] = [
-				createReadTool(ctx.cwd),
-				createBashTool(ctx.cwd),
-				createEditTool(ctx.cwd),
-				createWriteTool(ctx.cwd),
-			];
-
-			// --- System prompt from main agent ---
-			const systemPrompt = ctx.getSystemPrompt();
-
-			// --- API key resolver ---
-			const apiKeyResolver = async (_provider: string) => {
-				const auth = await ctx.modelRegistry.getApiKeyAndHeaders(targetModel!);
-				return auth.ok ? auth.apiKey : undefined;
-			};
-
 			const makeDetails = (results: SingleResult[]): SubagentDetails => ({ results });
 
 			const allResults: SingleResult[] = params.tasks.map((task) => ({
@@ -136,19 +107,19 @@ export default function (pi: ExtensionAPI) {
 			};
 
 			const results = await mapWithConcurrency(params.tasks, MAX_CONCURRENCY, async (task, index) => {
-				const result = await runSubagent(
-					systemPrompt,
+				const result = await runSubagent({
+					cwd: ctx.cwd,
+					modelRegistry: ctx.modelRegistry,
+					model: targetModel!,
+					thinkingLevel: targetThinkingLevel,
 					task,
-					tools,
-					targetModel!,
-					targetThinkingLevel,
-					apiKeyResolver,
+					parentSessionFile: ctx.sessionManager?.getSessionFile(),
 					signal,
-					(r) => {
+					onProgress: (r) => {
 						allResults[index] = r;
 						emitUpdate();
 					},
-				);
+				});
 				allResults[index] = result;
 				emitUpdate();
 				return result;
@@ -157,7 +128,17 @@ export default function (pi: ExtensionAPI) {
 			const successCount = results.filter((r) => r.exitCode === 0).length;
 			const failCount = results.length - successCount;
 			const summaries = results.map((r) => {
-				return `[${r.exitCode === 0 ? "✓" : "✗"}] ${r.finalOutput || "(no output)"}`;
+				const icon = r.exitCode === 0 ? "✓" : "✗";
+				// Include the session file path so the caller can session_query the
+				// subagent's full transcript (session_query needs a path, not an id).
+				const sessionRef = r.sessionFile ? `\n(session_query sessionPath: ${r.sessionFile})` : "";
+				if (r.exitCode === 0) {
+					return `[${icon}] ${r.finalOutput || "(no output)"}${sessionRef}`;
+				}
+				// On failure, surface the error (and any partial output) to the caller
+				// instead of a bare "(no output)".
+				const parts = [r.errorMessage, r.finalOutput].filter((s) => s && s.trim());
+				return `[${icon}] ${parts.length ? parts.join("\n") : "(no output)"}${sessionRef}`;
 			});
 
 			const isError = results.length === 1 ? results[0].exitCode !== 0 : failCount === results.length;

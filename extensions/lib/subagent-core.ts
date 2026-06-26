@@ -5,14 +5,22 @@
  * Contains the core runner, types, rendering helpers, and TUI rendering.
  */
 
-import { agentLoop } from "@mariozechner/pi-agent-core";
-import type { AgentContext, AgentLoopConfig, AgentMessage, AgentTool } from "@mariozechner/pi-agent-core";
-import { convertToLlm, getMarkdownTheme } from "@mariozechner/pi-coding-agent";
+import {
+	createAgentSession,
+	createBashToolDefinition,
+	DefaultResourceLoader,
+	getMarkdownTheme,
+	SessionManager,
+	SettingsManager,
+} from "@mariozechner/pi-coding-agent";
+
+import { loadAmplikeSettings, resolveBashAction } from "./permissions-core.js";
 import type { Theme } from "@mariozechner/pi-coding-agent";
 import type { Component, MarkdownTheme } from "@mariozechner/pi-tui";
 import { Container, Markdown, Spacer, Text } from "@mariozechner/pi-tui";
 
 import * as os from "node:os";
+import * as path from "node:path";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -43,6 +51,10 @@ export interface SingleResult {
 	model?: string;
 	stopReason?: string;
 	errorMessage?: string;
+	/** Subagent session id (persisted) for follow-up session-query. */
+	sessionId?: string;
+	/** Path to the persisted subagent session file, if any. */
+	sessionFile?: string;
 }
 
 export interface SubagentDetails {
@@ -393,16 +405,232 @@ export function renderProgressPlainLines(task: string, result: SingleResult): st
 // Core: run a single subagent loop
 // ---------------------------------------------------------------------------
 
-export async function runSubagent(
-	systemPrompt: string,
-	task: string,
-	tools: AgentTool<any>[],
-	model: any,
-	thinkingLevel: string,
-	apiKeyResolver: (provider: string) => Promise<string | undefined>,
-	signal: AbortSignal | undefined,
-	onProgress: (result: SingleResult) => void,
-): Promise<SingleResult> {
+// Completion-detection tuning. AgentSession changes `isStreaming` WITHOUT
+// emitting an event (observed: agent_end fires while still streaming, then the
+// flag clears silently), so we must poll. SETTLE_MS is how often we re-check.
+const SETTLE_MS = 150;
+// After compaction_end{willRetry} / auto_retry_start, AgentSession continues the
+// loop via an internal `setTimeout(continue, 100)`. We hold a deterministic
+// `pendingContinue` flag across that gap; CONTINUE_GRACE_MS only bounds the
+// silent/no-op case where the continuation never actually starts. It must
+// comfortably exceed that internal 100ms.
+const CONTINUE_GRACE_MS = 700;
+
+// Warn (once per process) if AgentSession's internal event queue can no longer be
+// drained — the barrier still works via polling, but loses some tightness.
+let _warnedDrainUnavailable = false;
+function warnDrainUnavailableOnce(): void {
+	if (_warnedDrainUnavailable) return;
+	_warnedDrainUnavailable = true;
+	try {
+		process.stderr.write(
+			"[pi-amplike subagent] AgentSession._agentEventQueue unavailable; " +
+				"completion barrier falling back to polling only (pi internals may have changed).\n",
+		);
+	} catch {
+		/* ignore */
+	}
+}
+
+/**
+ * A `bash` tool that enforces amp permissions before executing. Subagents have
+ * no UI, so anything that isn't auto-`allow`ed (i.e. `ask`/`deny`/`reject`) is
+ * blocked rather than silently bypassing the policy the parent session enforces.
+ * Registered via `customTools` (name "bash"), which overrides the built-in bash
+ * in AgentSession's tool registry — no extension binding required.
+ *
+ * Blocking THROWS (rather than returning {isError:true}): pi-agent-core only
+ * marks a tool result as an error when execute throws, so a returned isError
+ * would be reported to the model as a successful call.
+ *
+ * Shell settings (path/prefix) are threaded through so subagent bash matches the
+ * parent's shell semantics (aliases, command prefix, custom shell).
+ */
+export function createGatedBashDefinition(
+	cwd: string,
+	shellOptions?: { shellPath?: string; commandPrefix?: string },
+): any {
+	const base = createBashToolDefinition(cwd, {
+		shellPath: shellOptions?.shellPath,
+		commandPrefix: shellOptions?.commandPrefix,
+	});
+	return {
+		...base,
+		async execute(toolCallId: string, params: any, signal: any, onUpdate: any, ctx: any) {
+			const command = String(params?.command ?? "");
+			const yolo = loadAmplikeSettings().permissions?.mode === "yolo";
+			if (!yolo) {
+				const action = resolveBashAction(command, cwd);
+				if (action !== "allow") {
+					throw new Error(
+						`Blocked by amp permissions (action: ${action}). Subagents run non-interactively, so only auto-allowed commands execute. Run this in the main session or adjust amp.permissions.`,
+					);
+				}
+			}
+			return base.execute(toolCallId, params, signal, onUpdate, ctx);
+		},
+	};
+}
+
+export interface SettleController {
+	/** Feed a session event (only type/willRetry are inspected). */
+	onEvent(event: { type?: string; willRetry?: boolean }): void;
+	/** Re-check for completion now (e.g. after prompt() resolves). */
+	kick(): void;
+	/** Resolves once the session is judged settled (idle + no pending continue). */
+	done: Promise<void>;
+	dispose(): void;
+}
+
+/**
+ * Completion barrier for an AgentSession-like object, factored out so it can be
+ * unit-tested deterministically (see test). Rationale (all observed):
+ *  - AgentSession's `isStreaming` clears WITHOUT an event -> we must poll.
+ *  - overflow/retry continue the loop via an internal `setTimeout(continue,100)`
+ *    after compaction_end{willRetry}/auto_retry_start, with nothing "busy" in
+ *    between -> we hold `pendingContinue` from that event until the
+ *    continuation's agent_start/message_start, bounding the silent/no-op case
+ *    with `graceMs`.
+ *
+ * `isBusy()` reports session-level busy flags only (NOT pendingContinue).
+ * `drain()` optionally flushes the session's async event queue before judging.
+ */
+export function createSettleController(opts: {
+	isBusy: () => boolean;
+	drain?: () => Promise<void>;
+	settleMs?: number;
+	graceMs?: number;
+}): SettleController {
+	const settleMs = opts.settleMs ?? SETTLE_MS;
+	const graceMs = opts.graceMs ?? CONTINUE_GRACE_MS;
+	let resolveDone!: () => void;
+	const done = new Promise<void>((r) => {
+		resolveDone = r;
+	});
+	let settleTimer: ReturnType<typeof setTimeout> | undefined;
+	let graceTimer: ReturnType<typeof setTimeout> | undefined;
+	let pendingContinue = false;
+	let disposed = false;
+
+	const clearPending = () => {
+		pendingContinue = false;
+		if (graceTimer) {
+			clearTimeout(graceTimer);
+			graceTimer = undefined;
+		}
+	};
+	const busy = () => pendingContinue || opts.isBusy();
+	const arm = () => {
+		if (disposed) return;
+		if (settleTimer) clearTimeout(settleTimer);
+		settleTimer = setTimeout(async () => {
+			// A throwing/rejecting drain must not strand `done` or surface as an
+			// unhandled rejection — treat it as "drained" and judge on flags.
+			if (opts.drain) {
+				try {
+					await opts.drain();
+				} catch {
+					/* best-effort */
+				}
+			}
+			if (disposed) return;
+			if (busy()) arm();
+			else resolveDone();
+		}, settleMs);
+	};
+	const markPendingContinue = () => {
+		pendingContinue = true;
+		if (graceTimer) clearTimeout(graceTimer);
+		graceTimer = setTimeout(() => {
+			pendingContinue = false;
+			graceTimer = undefined;
+			arm();
+		}, graceMs);
+	};
+
+	return {
+		onEvent(event) {
+			switch (event?.type) {
+				case "agent_start":
+				case "message_start":
+					// A (possibly continued) turn actually started; the gap is over.
+					clearPending();
+					break;
+				case "compaction_end":
+					if (event.willRetry) markPendingContinue();
+					break;
+				case "auto_retry_start":
+					markPendingContinue();
+					break;
+			}
+			arm();
+		},
+		kick() {
+			arm();
+		},
+		done,
+		dispose() {
+			disposed = true;
+			if (settleTimer) clearTimeout(settleTimer);
+			clearPending();
+		},
+	};
+}
+
+function resolveAgentDir(): string {
+	const env = process.env.PI_CODING_AGENT_DIR;
+	if (env) {
+		if (env === "~") return os.homedir();
+		if (env.startsWith("~/")) return path.join(os.homedir(), env.slice(2));
+		return env;
+	}
+	return path.join(os.homedir(), ".pi", "agent");
+}
+
+export interface RunSubagentOptions {
+	/** Working directory for tool execution and resource discovery. */
+	cwd: string;
+	/** Model registry (for auth + model discovery). */
+	modelRegistry: any;
+	/** Target model object (pi-ai Model). */
+	model: any;
+	/** Thinking/reasoning level. */
+	thinkingLevel: string;
+	/** The task prompt. */
+	task: string;
+	/** Parent session file path, to thread the subagent session under it. */
+	parentSessionFile?: string;
+	/** Optional abort signal. */
+	signal?: AbortSignal;
+	/** Progress callback, fired on each message/tool/compaction event. */
+	onProgress: (result: SingleResult) => void;
+}
+
+/**
+ * Run a single subagent using a full AgentSession.
+ *
+ * Unlike a bare agentLoop, AgentSession brings the complete orchestration that
+ * the interactive/print/rpc run modes use: threshold compaction, overflow
+ * recovery (compact+retry when the context window is exceeded), and auto-retry
+ * on transient errors. The subagent is just another headless "run mode" over
+ * AgentSession.
+ *
+ * Isolation: extensions are NOT loaded (`noExtensions`). Extensions hold
+ * module-level state and register on a shared runtime, so binding the full set
+ * inside a second in-process session corrupts the PARENT session's extensions
+ * (observed: a parent widget callback hitting a stale ctx crashed the host).
+ * Loading none keeps the subagent to the four built-in tools and a system
+ * prompt composed only from system-prompt/context files (no extension-driven
+ * variation). Running the full extension set safely would require a separate
+ * process. The session is still persisted, so it stays queryable.
+ *
+ * Because the permissions extension is not loaded, bash would otherwise bypass
+ * amp's allow/ask/deny policy; we re-enforce it via a gated `bash` customTool
+ * (createGatedBashDefinition) that overrides the built-in.
+ */
+export async function runSubagent(opts: RunSubagentOptions): Promise<SingleResult> {
+	const { cwd, modelRegistry, model, thinkingLevel, task, parentSessionFile, signal, onProgress } = opts;
+
 	const result: SingleResult = {
 		task,
 		exitCode: -1,
@@ -412,57 +640,156 @@ export async function runSubagent(
 		model: `${model.provider}/${model.id}`,
 	};
 
-	const subagentPrompt: AgentMessage = {
-		role: "user" as const,
-		content: [
-			{
-				type: "text" as const,
-				text: [
-					"You are operating as a subagent within a larger agent session.",
-					"Complete the following task thoroughly, then provide your final response as text.",
-					"Be concise and focused. Do NOT attempt to hand off or spawn further subagents.",
-					"",
-					task,
-				].join("\n"),
-			},
-		],
-		timestamp: Date.now(),
-	};
+	// Abort before we even start.
+	if (signal?.aborted) {
+		result.exitCode = 1;
+		result.stopReason = "aborted";
+		result.errorMessage = "aborted before start";
+		return result;
+	}
 
-	// Fresh context: just the system prompt, no message history
-	const context: AgentContext = {
-		systemPrompt,
-		messages: [],
-		tools,
-	};
+	const subagentTask = [
+		"You are operating as a subagent within a larger agent session.",
+		"Complete the following task thoroughly, then provide your final response as text.",
+		"Be concise and focused.",
+		"",
+		task,
+	].join("\n");
 
-	const config: AgentLoopConfig = {
-		model,
-		convertToLlm: (msgs: AgentMessage[]) => convertToLlm(msgs),
-		getApiKey: apiKeyResolver,
-		reasoning: thinkingLevel !== "off" ? (thinkingLevel as any) : undefined,
-	};
+	const agentDir = resolveAgentDir();
+	let session: any;
+	let unsubscribe: (() => void) | undefined;
+	let onAbort: (() => void) | undefined;
+	let settle: SettleController | undefined;
 
 	try {
-		const stream = agentLoop([subagentPrompt], context, config, signal);
+		const settingsManager = SettingsManager.create(cwd, agentDir);
+		const resourceLoader = new DefaultResourceLoader({
+			cwd,
+			agentDir,
+			settingsManager,
+			// Isolation: do not load extensions in-process (see function doc).
+			noExtensions: true,
+		});
+		await resourceLoader.reload();
 
-		for await (const event of stream) {
-			if (signal?.aborted) break;
+		// Persisted (not in-memory) so the subagent transcript is queryable later.
+		// Thread it under the parent session (mirrors AgentSessionRuntime.newSession).
+		const sessionManager = SessionManager.create(cwd);
+		if (parentSessionFile) {
+			sessionManager.newSession({ parentSession: parentSessionFile });
+		}
 
+		const created = await createAgentSession({
+			cwd,
+			agentDir,
+			modelRegistry,
+			model,
+			thinkingLevel: thinkingLevel as any,
+			sessionManager,
+			// Override the built-in bash with a permission-gated one (no extensions
+			// loaded means the permissions extension can't gate it otherwise). Thread
+			// shell settings through so semantics match the parent's built-in bash.
+			customTools: [createGatedBashDefinition(cwd, {
+				shellPath: settingsManager.getShellPath?.(),
+				commandPrefix: settingsManager.getShellCommandPrefix?.(),
+			})],
+			resourceLoader,
+			settingsManager,
+		});
+		session = created.session;
+		await session.bindExtensions({});
+
+		result.sessionId = session.sessionManager.getSessionId();
+		result.sessionFile = session.sessionManager.getSessionFile();
+
+		// Compute usage the same way pi's status bar does: cumulative over ALL
+		// assistant entries (survives compaction, monotonic), and context size via
+		// getContextUsage() (correct after compaction).
+		const syncUsage = () => {
+			try {
+				let input = 0;
+				let output = 0;
+				let cacheRead = 0;
+				let cacheWrite = 0;
+				let cost = 0;
+				let turns = 0;
+				for (const entry of session.sessionManager.getEntries()) {
+					if (entry.type === "message" && entry.message.role === "assistant") {
+						const u = entry.message.usage;
+						if (u) {
+							input += u.input || 0;
+							output += u.output || 0;
+							cacheRead += u.cacheRead || 0;
+							cacheWrite += u.cacheWrite || 0;
+							cost += u.cost?.total || 0;
+						}
+						turns++;
+					}
+				}
+				result.usage.input = input;
+				result.usage.output = output;
+				result.usage.cacheRead = cacheRead;
+				result.usage.cacheWrite = cacheWrite;
+				result.usage.cost = cost;
+				result.usage.turns = turns;
+				const ctx = session.getContextUsage();
+				if (ctx?.tokens != null) result.usage.contextTokens = ctx.tokens;
+			} catch {
+				/* best-effort */
+			}
+		};
+
+		const report = () => {
+			try {
+				syncUsage();
+				onProgress(result);
+			} catch {
+				// A throwing progress/UI callback must never break the barrier or the
+				// session's event processing.
+			}
+		};
+
+		// AgentSession processes agent events through an async queue
+		// (`_agentEventQueue`); `isStreaming` flips synchronously but our subscriber
+		// and `isCompacting` (set during event processing) can lag. Draining it
+		// before judging idle materializes a just-finished turn's compaction trigger.
+		//
+		// This reaches into a private field. It degrades safely: if the field is
+		// renamed/removed we no-op (and warn once), and the poll + pendingContinue
+		// logic still detect completion — just slightly less tightly.
+		const drainQueue = async () => {
+			try {
+				const q = (session as any)?._agentEventQueue;
+				if (q && typeof q.then === "function") {
+					await q;
+				} else {
+					warnDrainUnavailableOnce();
+				}
+			} catch {
+				/* best-effort */
+			}
+		};
+
+		// Completion barrier — see createSettleController. prompt() resolves before
+		// overflow compaction+retry finishes, and isStreaming flips silently, so we
+		// poll session flags + hold pendingContinue across the continue gap.
+		settle = createSettleController({
+			isBusy: () =>
+				session.isStreaming ||
+				session.isCompacting ||
+				session.isRetrying ||
+				session.pendingMessageCount > 0 ||
+				session.isBashRunning ||
+				session.hasPendingBashMessages,
+			drain: drainQueue,
+		});
+
+		unsubscribe = session.subscribe((event: any) => {
 			switch (event.type) {
 				case "message_end": {
 					const msg = event.message as any;
 					if (msg.role === "assistant") {
-						result.usage.turns++;
-						const usage = msg.usage;
-						if (usage) {
-							result.usage.input += usage.input || 0;
-							result.usage.output += usage.output || 0;
-							result.usage.cacheRead += usage.cacheRead || 0;
-							result.usage.cacheWrite += usage.cacheWrite || 0;
-							result.usage.cost += usage.cost?.total || 0;
-							result.usage.contextTokens = usage.totalTokens || 0;
-						}
 						if (msg.model) result.model = msg.model;
 						if (msg.stopReason) result.stopReason = msg.stopReason;
 						if (msg.errorMessage) result.errorMessage = msg.errorMessage;
@@ -480,16 +807,68 @@ export async function runSubagent(
 							}
 						}
 					}
-					onProgress(result);
 					break;
 				}
-				case "tool_execution_end": {
-					onProgress(result);
+				case "compaction_start": {
+					result.displayItems.push({ type: "text", text: `↯ compacting context (${event.reason})…` });
 					break;
 				}
 			}
+			report();
+			settle?.onEvent(event); // barrier bookkeeping (pendingContinue + re-arm)
+		});
+
+		onAbort = () => {
+			// abort() stops the current run/retry but NOT auto-compaction; abort both.
+			try {
+				session.abortCompaction();
+			} catch {
+				/* best-effort */
+			}
+			void session.abort();
+		};
+		signal?.addEventListener("abort", onAbort, { once: true });
+
+		// Re-check: the signal may have fired during the async setup above, before
+		// the listener was attached.
+		if (signal?.aborted) {
+			onAbort();
+			throw new Error("aborted during setup");
 		}
 
+		await session.prompt(subagentTask, { source: "extension" });
+		settle.kick();
+		await settle.done;
+		await drainQueue();
+
+		// Read authoritative final state from the session (our subscriber capture
+		// can lag the async event queue).
+		try {
+			const msgs: any[] = session.state?.messages ?? [];
+			for (let i = msgs.length - 1; i >= 0; i--) {
+				if (msgs[i]?.role === "assistant") {
+					const m = msgs[i];
+					if (m.model) result.model = m.model;
+					if (m.stopReason) result.stopReason = m.stopReason;
+					result.errorMessage = m.errorMessage || result.errorMessage;
+					const text = (m.content || [])
+						.filter((p: any) => p.type === "text")
+						.map((p: any) => p.text)
+						.join("");
+					if (text) result.finalOutput = text;
+					break;
+				}
+			}
+		} catch {
+			/* fall back to subscriber-captured values */
+		}
+		syncUsage();
+
+		if (signal?.aborted) {
+			result.stopReason = "aborted";
+		}
+
+		// Finalize.
 		if (result.stopReason === "error" || result.stopReason === "aborted") {
 			result.exitCode = 1;
 		} else if (result.exitCode === -1) {
@@ -500,6 +879,15 @@ export async function runSubagent(
 		result.errorMessage = err instanceof Error ? err.message : String(err);
 		if (signal?.aborted) {
 			result.stopReason = "aborted";
+		}
+	} finally {
+		settle?.dispose();
+		if (signal && onAbort) signal.removeEventListener("abort", onAbort);
+		unsubscribe?.();
+		try {
+			session?.dispose();
+		} catch {
+			/* best-effort cleanup */
 		}
 	}
 

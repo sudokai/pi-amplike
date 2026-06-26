@@ -12,15 +12,9 @@
  * (identical to the subagent tool's result rendering).
  */
 
-import type { AgentTool } from "@mariozechner/pi-agent-core";
-
 import type { ExtensionAPI, SessionEntry } from "@mariozechner/pi-coding-agent";
 import {
 	convertToLlm,
-	createBashTool,
-	createEditTool,
-	createReadTool,
-	createWriteTool,
 	getMarkdownTheme,
 	serializeConversation,
 } from "@mariozechner/pi-coding-agent";
@@ -169,20 +163,6 @@ export default function (pi: ExtensionAPI) {
 				return;
 			}
 
-			// Build tools
-			const tools: AgentTool<any>[] = [
-				createReadTool(ctx.cwd),
-				createBashTool(ctx.cwd),
-				createEditTool(ctx.cwd),
-				createWriteTool(ctx.cwd),
-			];
-
-			const systemPrompt = ctx.getSystemPrompt();
-			const apiKeyResolver = async (_provider: string) => {
-				const auth = await ctx.modelRegistry.getApiKeyAndHeaders(targetModel!);
-				return auth.ok ? auth.apiKey : undefined;
-			};
-
 			// Serialize current conversation context for the subagent
 			const branch = ctx.sessionManager.getBranch();
 			const messages = branch
@@ -205,19 +185,19 @@ export default function (pi: ExtensionAPI) {
 			ctx.ui.setWidget(widgetKey, [`⏳ btw: ${taskPreview}`], { placement: "aboveEditor" });
 
 			// Fire and forget — run in background, update widget on progress
-			runSubagent(
-				systemPrompt,
-				taskWithContext,
-				tools,
-				targetModel,
+			runSubagent({
+				cwd: ctx.cwd,
+				modelRegistry: ctx.modelRegistry,
+				model: targetModel,
 				thinkingLevel,
-				apiKeyResolver,
-				undefined, // no abort signal — runs to completion
-				(progressResult) => {
+				task: taskWithContext,
+				parentSessionFile: ctx.sessionManager?.getSessionFile(),
+				// no abort signal — runs to completion
+				onProgress: (progressResult) => {
 					// Update widget with live tool call feed
 					ctx.ui.setWidget(widgetKey, renderProgressPlainLines(task, progressResult), { placement: "aboveEditor" });
 				},
-			).then(async (result) => {
+			}).then(async (result) => {
 				// Override result.task with the short user prompt (not the context-enriched one)
 				result.task = task;
 

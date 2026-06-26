@@ -44,7 +44,11 @@
   "engines": {
     "node": ">=18"
   },
+  "scripts": {
+    "test": "node test/settle-controller.test.mjs"
+  },
   "devDependencies": {
+    "@mariozechner/jiti": "^2.6.5",
     "@types/node": "^25.1.0",
     "typescript": "^5.9.3"
   },
