@@ -49,6 +49,34 @@ function setPendingHandoffGlobal(data: PendingHandoffGlobal) {
 	}
 }
 
+// Cross-extension coordination flag, true from the moment a handoff is pending
+// until the new session has been (re)started and its prompt dispatched. A
+// persistent extension that autonomously triggers turns when the agent is idle
+// (the advisor) reads this via the same Symbol.for key and stands down for the
+// duration, so it doesn't (a) start a turn that races the handoff's deferred
+// sendUserMessage, or (b) inject stray advice into the session that is being
+// torn down / replaced. The deferred sendUserMessage below also passes
+// deliverAs:"followUp" as a belt-and-suspenders guard against any other source
+// of a concurrent turn (e.g. a user-invoked /review).
+const HANDOFF_IN_PROGRESS_KEY = Symbol.for("pi-amplike-handoff-in-progress");
+
+// Event-bus channel emitted right after the tool-path handoff replaces the
+// session transcript. The tool path uses the low-level sessionManager.newSession(),
+// which (unlike the command path's cmdCtx.newSession()) does NOT emit a
+// `session_start` event, so persistent extensions that key their transcript
+// reset off session_start (the advisor) would otherwise carry stale state into
+// the handed-off session. They subscribe to this channel to reset cleanly.
+// The EventBus is shared across extensions within a runner, and the tool path
+// keeps the runner alive, so this reaches the advisor in-process.
+export const HANDOFF_SESSION_REPLACED_CHANNEL = "pi-amplike:handoff-session-replaced";
+function setHandoffInProgress(active: boolean): void {
+	if (active) {
+		(globalThis as any)[HANDOFF_IN_PROGRESS_KEY] = true;
+	} else {
+		delete (globalThis as any)[HANDOFF_IN_PROGRESS_KEY];
+	}
+}
+
 const CONTEXT_SUMMARY_SYSTEM_PROMPT = `You are a context transfer assistant. Given a conversation history and the user's goal for a new thread, generate a focused prompt that:
 
 1. Summarizes relevant context from the conversation (decisions made, approaches taken, key findings)
@@ -267,9 +295,11 @@ async function performHandoff(
 			}
 			: undefined;
 		setPendingHandoffGlobal({ prompt: finalPrompt, options, restore });
+		setHandoffInProgress(true);
 		const newSessionResult = await cmdCtx.newSession({ parentSession: currentSessionFile });
 		if (newSessionResult.cancelled) {
 			setPendingHandoffGlobal(null);
+			setHandoffInProgress(false);
 			return;
 		}
 		// Don't call pi.sendUserMessage() here — the old pi is dead after session
@@ -281,6 +311,7 @@ async function performHandoff(
 		// perform the session switch after the current agent loop completes.
 		// The context event handler ensures the LLM only sees new-session messages.
 		setPendingHandoff({ prompt: finalPrompt, parentSession: currentSessionFile, options });
+		setHandoffInProgress(true);
 	}
 
 	return undefined;
@@ -362,13 +393,28 @@ export default function (pi: ExtensionAPI) {
 		// runtime or clear agent.state.messages (we handle that via context event).
 		(ctx.sessionManager as any).newSession({ parentSession });
 
+		// This low-level switch emits no session_start, so signal transcript-keyed
+		// extensions (the advisor) to reset before the new session's first turn.
+		pi.events.emit(HANDOFF_SESSION_REPLACED_CHANNEL, {});
+
 		// Defer sendUserMessage to the next macrotask to ensure the old agent
 		// loop's _runLoop cleanup has fully completed (isStreaming reset,
 		// runningPrompt resolved). Without this, we'd have two concurrent
 		// _runLoop instances with conflicting state.
 		setTimeout(async () => {
-			await applyHandoffOptions(pi, ctx, options);
-			pi.sendUserMessage(prompt);
+			try {
+				await applyHandoffOptions(pi, ctx, options);
+				// deliverAs:"followUp" makes this resilient: if some other extension
+				// (e.g. the advisor) has slipped a turn in and the agent is mid-stream,
+				// the prompt is queued and delivered when that turn ends instead of
+				// throwing "Agent is already processing" and losing the handoff. When the
+				// agent is idle (the normal case) the behavior is unchanged.
+				pi.sendUserMessage(prompt, { deliverAs: "followUp" });
+			} finally {
+				// Always release the coordination flag, even if applyHandoffOptions throws,
+				// so a failed handoff never leaves the advisor permanently muted.
+				setHandoffInProgress(false);
+			}
 		}, 0);
 	});
 
@@ -413,8 +459,12 @@ export default function (pi: ExtensionAPI) {
 				if (pending.restore) {
 					await restoreHandoffSelection(pi, ctx, pending.restore);
 				}
-				await applyHandoffOptions(pi, ctx, pending.options);
-				pi.sendUserMessage(pending.prompt);
+				try {
+					await applyHandoffOptions(pi, ctx, pending.options);
+					pi.sendUserMessage(pending.prompt, { deliverAs: "followUp" });
+				} finally {
+					setHandoffInProgress(false);
+				}
 			}
 		}
 	});
