@@ -415,6 +415,17 @@ const SETTLE_MS = 150;
 // silent/no-op case where the continuation never actually starts. It must
 // comfortably exceed that internal 100ms.
 const CONTINUE_GRACE_MS = 700;
+// A threshold compaction (willRetry:false) can land as a subagent turn's terminal
+// event, ending the turn before the model emits its final answer. Interactive pi
+// relies on the human pressing enter to continue; a subagent has nobody, so we
+// nudge it ourselves. Capped to avoid a think→length→compact→nudge spiral.
+const MAX_RESUME_NUDGES = 3;
+const RESUME_NUDGE_TEXT =
+	"Context was compacted mid-turn. Continue from where you left off.";
+// Prepended when we surface a compaction summary as the subagent's output (the
+// nudge budget was exhausted). Marks it as recovered progress, not a real answer.
+const FALLBACK_SUMMARY_PREFIX =
+	"⚠ Subagent ran out of context before writing a final answer; its latest compaction summary follows.";
 
 /**
  * A `bash` tool that enforces amp permissions before executing. Subagents have
@@ -579,6 +590,80 @@ export interface RunSubagentOptions {
 	onProgress: (result: SingleResult) => void;
 }
 
+// ---------------------------------------------------------------------------
+// Resume-decision logic (pure, exported for testing). Extracted so the subtle
+// "subagent stalled on a terminal threshold compaction" handling can be unit-
+// tested without a live AgentSession (see test/resume-decision.test.mjs).
+// ---------------------------------------------------------------------------
+
+/** Concatenated text of the latest assistant message ("" if none / no text). */
+export function lastAssistantText(messages: any[]): string {
+	for (let i = messages.length - 1; i >= 0; i--) {
+		if (messages[i]?.role === "assistant") {
+			return (messages[i].content || [])
+				.filter((p: any) => p.type === "text")
+				.map((p: any) => p.text)
+				.join("");
+		}
+	}
+	return "";
+}
+
+export interface CompactionInfo {
+	willRetry: boolean;
+	reason?: string;
+	aborted: boolean;
+	summary?: string;
+}
+
+/**
+ * The resumable stall: a SUCCESSFUL threshold compaction (has a summary) that
+ * the runtime won't auto-continue (willRetry:false) and which no human is
+ * present to resume. Excludes:
+ *   - overflow compactions (willRetry:true — already auto-continued),
+ *   - aborted compactions (user cancelled),
+ *   - FAILED compactions (result/summary undefined — context still full, so a
+ *     nudge is futile and would emit a misleading "context was compacted").
+ */
+export function isTerminalThresholdCompaction(c: CompactionInfo | undefined): boolean {
+	return !!c && !c.willRetry && c.reason === "threshold" && !c.aborted && !!c.summary;
+}
+
+export type ResumeDecision =
+	| { action: "done"; output: string }
+	| { action: "nudge" }
+	| { action: "fallback"; output: string }
+	| { action: "empty" };
+
+/**
+ * Decide what to do after a subagent turn settles.
+ *  - done:     the turn produced final text -> use it.
+ *  - nudge:    stalled on a resumable terminal threshold compaction, budget left.
+ *  - fallback: stalled, nudge budget exhausted -> surface the compaction summary.
+ *  - empty:    nothing usable. Includes error/abort: we deliberately do NOT
+ *              fabricate a summary under a failed/aborted run (the parent renders
+ *              those as failures; a summary body would read as a fake answer).
+ */
+export function decideResume(args: {
+	finalText: string;
+	lastCompaction: CompactionInfo | undefined;
+	nudges: number;
+	maxNudges: number;
+	stopReason?: string;
+	aborted?: boolean;
+}): ResumeDecision {
+	const { finalText, lastCompaction, nudges, maxNudges, stopReason, aborted } = args;
+	if (finalText) return { action: "done", output: finalText };
+	if (!isTerminalThresholdCompaction(lastCompaction)) return { action: "empty" };
+	// Error/abort: surface the failure cleanly, no fabricated output. Both the
+	// abort signal and an "aborted" stopReason count (the latter can be set on a
+	// turn aborted mid-stream even before the outer signal check runs).
+	if (stopReason === "error" || stopReason === "aborted" || aborted) return { action: "empty" };
+	if (nudges < maxNudges) return { action: "nudge" };
+	// Budget exhausted on an otherwise-healthy stall: summary guaranteed present.
+	return { action: "fallback", output: lastCompaction!.summary! };
+}
+
 /**
  * Run a single subagent using a full AgentSession.
  *
@@ -634,6 +719,12 @@ export async function runSubagent(opts: RunSubagentOptions): Promise<SingleResul
 	let unsubscribe: (() => void) | undefined;
 	let onAbort: (() => void) | undefined;
 	let settle: SettleController | undefined;
+	// Most recent compaction's disposition, so the post-settle resume loop can
+	// distinguish a terminal threshold compaction (willRetry:false, nothing
+	// auto-continues it) from an overflow compaction that resumes on its own.
+	let lastCompaction:
+		| { willRetry: boolean; reason?: string; aborted: boolean; summary?: string }
+		| undefined;
 
 	try {
 		const settingsManager = SettingsManager.create(cwd, agentDir);
@@ -726,15 +817,24 @@ export async function runSubagent(opts: RunSubagentOptions): Promise<SingleResul
 		// Completion barrier — see createSettleController. prompt() resolves before
 		// overflow compaction+retry finishes, and isStreaming flips silently, so we
 		// poll session flags + hold pendingContinue across the continue gap.
-		settle = createSettleController({
-			isBusy: () =>
-				session.isStreaming ||
-				session.isCompacting ||
-				session.isRetrying ||
-				session.pendingMessageCount > 0 ||
-				session.isBashRunning ||
-				session.hasPendingBashMessages,
-		});
+		const isBusy = () =>
+			session.isStreaming ||
+			session.isCompacting ||
+			session.isRetrying ||
+			session.pendingMessageCount > 0 ||
+			session.isBashRunning ||
+			session.hasPendingBashMessages;
+		// Each prompt/continue needs its own barrier: `settle.done` is a one-shot
+		// promise (resolves once), so reusing it across resume-nudges would return
+		// instantly. armSettle() disposes the previous controller and installs a
+		// fresh one; the subscriber reads `settle` from this scope, so the existing
+		// subscription automatically feeds whichever controller is current.
+		const armSettle = () => {
+			settle?.dispose();
+			settle = createSettleController({ isBusy });
+			return settle;
+		};
+		armSettle();
 
 		unsubscribe = session.subscribe((event: any) => {
 			switch (event.type) {
@@ -764,6 +864,22 @@ export async function runSubagent(opts: RunSubagentOptions): Promise<SingleResul
 					result.displayItems.push({ type: "text", text: `↯ compacting context (${event.reason})…` });
 					break;
 				}
+				case "compaction_end": {
+					lastCompaction = {
+						willRetry: !!event.willRetry,
+						reason: event.reason,
+						aborted: !!event.aborted,
+						summary: event.result?.summary,
+					};
+					break;
+				}
+				case "agent_start":
+				case "message_start": {
+					// A (possibly continued) turn started — any prior compaction was
+					// resumed, so it's no longer the turn's terminal event.
+					lastCompaction = undefined;
+					break;
+				}
 			}
 			report();
 			settle?.onEvent(event); // barrier bookkeeping (pendingContinue + re-arm)
@@ -787,30 +903,78 @@ export async function runSubagent(opts: RunSubagentOptions): Promise<SingleResul
 			throw new Error("aborted during setup");
 		}
 
-		await session.prompt(subagentTask, { source: "extension" });
-		settle.kick();
-		await settle.done;
-
 		// Read authoritative final state from the session (our subscriber capture
 		// can lag the async event queue).
-		try {
-			const msgs: any[] = session.state?.messages ?? [];
-			for (let i = msgs.length - 1; i >= 0; i--) {
-				if (msgs[i]?.role === "assistant") {
-					const m = msgs[i];
-					if (m.model) result.model = m.model;
-					if (m.stopReason) result.stopReason = m.stopReason;
-					result.errorMessage = m.errorMessage || result.errorMessage;
-					const text = (m.content || [])
-						.filter((p: any) => p.type === "text")
-						.map((p: any) => p.text)
-						.join("");
-					if (text) result.finalOutput = text;
-					break;
+		const readFinalState = () => {
+			try {
+				const msgs: any[] = session.state?.messages ?? [];
+				for (let i = msgs.length - 1; i >= 0; i--) {
+					if (msgs[i]?.role === "assistant") {
+						const m = msgs[i];
+						if (m.model) result.model = m.model;
+						if (m.stopReason) result.stopReason = m.stopReason;
+						result.errorMessage = m.errorMessage || result.errorMessage;
+						break;
+					}
 				}
+				// Authoritative: reflect ONLY the latest assistant turn's text, even when
+				// empty. The streaming subscriber sets finalOutput on every text part
+				// (including intermediate "let me inspect…" preambles before tool calls);
+				// overwriting-when-empty here prevents such a fragment from lingering and
+				// falsely satisfying the resume gate / suppressing the fallback.
+				result.finalOutput = lastAssistantText(msgs);
+			} catch {
+				/* fall back to subscriber-captured values */
 			}
-		} catch {
-			/* fall back to subscriber-captured values */
+		};
+
+		await session.prompt(subagentTask, { source: "extension" });
+		settle!.kick();
+		await settle!.done;
+		readFinalState();
+
+		// Resume loop. A successful threshold compaction (willRetry:false) can end a
+		// subagent turn before the final answer is emitted; the runtime won't auto-
+		// continue it and there's no human to press enter, so we nudge — capped to
+		// bound the worst case, with the compaction summary as a last-resort output.
+		// All branch logic lives in decideResume() (pure + unit-tested).
+		let nudges = 0;
+		for (;;) {
+			const decision = decideResume({
+				finalText: result.finalOutput,
+				lastCompaction,
+				nudges,
+				maxNudges: MAX_RESUME_NUDGES,
+				stopReason: result.stopReason,
+				aborted: !!signal?.aborted,
+			});
+			if (decision.action === "done" || decision.action === "empty") break;
+			if (decision.action === "fallback") {
+				// Label provenance: the summary is a progress doc, not a polished
+				// answer. Without this the parent renders `[✓] <summary>` as if it were
+				// the subagent's actual final response.
+				const labeled = `${FALLBACK_SUMMARY_PREFIX}\n\n${decision.output}`;
+				result.finalOutput = labeled;
+				result.displayItems.push({ type: "text", text: labeled });
+				break;
+			}
+			// decision.action === "nudge". Re-check abort here: it can fire after
+			// decideResume() read signal.aborted but before this prompt starts, and
+			// the {once:true} listener would have already been consumed.
+			if (signal?.aborted) break;
+			nudges++;
+			result.displayItems.push({
+				type: "text",
+				text: `↻ resuming after compaction (nudge ${nudges}/${MAX_RESUME_NUDGES})…`,
+			});
+			lastCompaction = undefined;
+			// Clear so readFinalState() below reflects only THIS nudge's text.
+			result.finalOutput = "";
+			armSettle();
+			await session.prompt(RESUME_NUDGE_TEXT, { source: "extension" });
+			settle!.kick();
+			await settle!.done;
+			readFinalState();
 		}
 		syncUsage();
 
