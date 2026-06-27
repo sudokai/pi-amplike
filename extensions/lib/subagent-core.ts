@@ -12,12 +12,12 @@ import {
 	getMarkdownTheme,
 	SessionManager,
 	SettingsManager,
-} from "@mariozechner/pi-coding-agent";
+} from "@earendil-works/pi-coding-agent";
 
 import { loadAmplikeSettings, resolveBashAction } from "./permissions-core.js";
-import type { Theme } from "@mariozechner/pi-coding-agent";
-import type { Component, MarkdownTheme } from "@mariozechner/pi-tui";
-import { Container, Markdown, Spacer, Text } from "@mariozechner/pi-tui";
+import type { Theme } from "@earendil-works/pi-coding-agent";
+import type { Component, MarkdownTheme } from "@earendil-works/pi-tui";
+import { Container, Markdown, Spacer, Text } from "@earendil-works/pi-tui";
 
 import * as os from "node:os";
 import * as path from "node:path";

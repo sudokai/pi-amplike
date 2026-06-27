@@ -12,13 +12,13 @@
  * (identical to the subagent tool's result rendering).
  */
 
-import type { ExtensionAPI, SessionEntry } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, SessionEntry } from "@earendil-works/pi-coding-agent";
 import {
 	convertToLlm,
 	getMarkdownTheme,
 	serializeConversation,
-} from "@mariozechner/pi-coding-agent";
-import { Box, Markdown, Spacer, Text } from "@mariozechner/pi-tui";
+} from "@earendil-works/pi-coding-agent";
+import { Box, Markdown, Spacer, Text } from "@earendil-works/pi-tui";
 
 import { resolveModelAndThinking } from "./lib/mode-utils.js";
 import {

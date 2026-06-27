@@ -53,8 +53,8 @@
     "typescript": "^5.9.3"
   },
   "dependencies": {
-    "@mariozechner/pi-coding-agent": "^0.69.0",
-    "@mariozechner/pi-tui": "^0.52.0"
+    "@earendil-works/pi-coding-agent": "^0.80.0",
+    "@earendil-works/pi-tui": "^0.80.0"
   },
   "peerDependencies": {
     "typebox": "*"
