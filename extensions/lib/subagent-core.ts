@@ -27,6 +27,23 @@ import * as path from "node:path";
 // ---------------------------------------------------------------------------
 
 export const MINIBOX_LINES = 10;
+// Max lines of the task/input prompt to show in any rendered view. A /review
+// task embeds the entire `git log` inside a ```…``` block, which can be hundreds
+// of lines; rendering it in full makes the (live-updating) progress widget span
+// the whole screen and flicker badly next to concurrent agent output. The full
+// task is always preserved in the session — this only clamps what's displayed.
+export const TASK_DISPLAY_LINES = 10;
+
+/**
+ * Clamp a task/input prompt to at most `maxLines` lines for display, appending a
+ * "… +N more lines" marker when truncated. Used everywhere the raw task is shown
+ * so an oversized input (e.g. a /review commit log) can't blow up the view.
+ */
+export function clampTaskForDisplay(task: string, maxLines = TASK_DISPLAY_LINES): string {
+	const lines = task.split("\n");
+	if (lines.length <= maxLines) return task;
+	return `${lines.slice(0, maxLines).join("\n")}\n… +${lines.length - maxLines} more lines`;
+}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -186,8 +203,9 @@ export function renderMinibox(
 	const lines: string[] = [];
 
 	if (options.showTask) {
-		// No truncation — let terminal wrap; full task shown on one line
-		lines.push(`${icon} ${theme.fg("dim", r.task)}`);
+		// Clamp the task to a few lines (see clampTaskForDisplay) so an oversized
+		// input can't blow the minibox up to full-screen and flicker.
+		lines.push(`${icon} ${theme.fg("dim", clampTaskForDisplay(r.task))}`);
 	} else {
 		lines.push(icon);
 	}
@@ -247,9 +265,10 @@ export function renderResultExpanded(
 			: theme.fg("error", "✗");
 
 	container.addChild(new Spacer(1));
-	// Expanded: show full task prompt
+	// Clamp the task prompt (see clampTaskForDisplay) so an oversized input can't
+	// dominate the transcript.
 	container.addChild(
-		new Text(`${theme.fg("muted", "─── ")}${rIcon} ${theme.fg("dim", r.task)}`, 0, 0),
+		new Text(`${theme.fg("muted", "─── ")}${rIcon} ${theme.fg("dim", clampTaskForDisplay(r.task))}`, 0, 0),
 	);
 
 	if (r.exitCode > 0 && r.errorMessage) {
