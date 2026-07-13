@@ -28,10 +28,6 @@
   - **`Ctrl+Shift+S`** - mode selector
   - **`Ctrl+Space`** - cycle modes
 
-### Web Access
-- **web-search** - Search the web via Jina Search API
-- **visit-webpage** - Extract webpage content as markdown (using Jina API), or download images
-
 ### Amp Skill Compatibility
 - Auto-loads Amp skill directories when present:
   - `~/.config/agents/skills`
@@ -177,8 +173,6 @@ Notes:
 | [modes](extensions/modes.ts) | Extension | Prompt mode manager with model/thinking/color presets, editor border overlay, and shortcuts |
 | [session-query](extensions/session-query.ts) | Extension | `session_query` tool for querying parent sessions; uses the queried session's own model for analysis |
 | [session-query](skills/session-query/) | Skill | Instructions for using the session_query tool |
-| [web-search](skills/web-search/) | Skill | Web search via Jina API |
-| [visit-webpage](skills/visit-webpage/) | Skill | Webpage content extraction |
 
 ## Why "AmpCode-like"?
 
