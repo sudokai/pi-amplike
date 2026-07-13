@@ -1,7 +1,7 @@
 /**
  * Deterministic regression tests for resolveModelAndThinking precedence.
  *
- * Run: node test/mode-utils.test.mjs   (wired into npm test)
+ * Run: npm test   (or: node test/mode-utils.test.mjs)
  */
 
 import * as fs from "node:fs";

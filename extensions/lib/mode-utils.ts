@@ -1,8 +1,8 @@
 /**
  * Shared mode/model resolution utilities.
  *
- * Used by handoff and subagent to resolve -mode and -model parameters
- * against modes.json.
+ * Used by handoff and subagent to resolve mode, model, and thinkingLevel
+ * parameters against modes.json.
  */
 
 import * as os from "node:os";

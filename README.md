@@ -83,7 +83,7 @@ Without these flags, `/handoff` keeps the current model and thinking level in th
 
 The handoff summary is always generated with the *current* session's model before switching.
 
-After generation, you review and edit the prompt once in the editor. When you accept, a new session opens and that message is submitted automatically—you do not need to submit again in the new session. Cancelling the editor leaves you in the current session.
+After generation, you review and edit the prompt in the editor. Accepting opens a new session and submits the approved message; cancelling leaves you in the current session.
 
 **Agent-invoked handoff:**
 The agent can also initiate a handoff when you explicitly ask for it:
@@ -92,7 +92,7 @@ The agent can also initiate a handoff when you explicitly ask for it:
 "Create a handoff session to execute phase one"
 ```
 
-The `handoff` tool also accepts optional `mode`, `model`, and `thinkingLevel` parameters (agent should set these only when you explicitly ask). You still get the same single editor review during the tool run; cancelling does not switch sessions.
+The `handoff` tool also accepts optional `mode`, `model`, and `thinkingLevel` parameters (agent should set these only when you explicitly ask). The tool path shows the same editor review before switching; cancelling does not switch sessions.
 
 Both methods create a new session with:
 - AI-generated summary of relevant context from the current conversation

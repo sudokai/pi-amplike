@@ -14,7 +14,7 @@
  *   /handoff -model anthropic/claude-haiku-4-5 check other places that need this fix
  *   /handoff -thinking high execute phase one of the plan
  *
- * After AI generation, the user reviews the prompt once in the editor; on accept,
+ * After AI generation, the user reviews the prompt in the editor; on accept,
  * the new session starts and the approved text is sent automatically.
  */
 
