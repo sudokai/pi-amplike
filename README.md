@@ -10,14 +10,14 @@
 
 ### Session Management
 - **Handoff** - Create a new focused session with AI-generated context transfer:
-  - **`/handoff <goal>`** command - Manually create a handoff session (potentially with `-mode <name>` / `-model <name>` parameter to switch models for the new session)
-  - **`handoff` tool** - The agent can invoke this (with optional `mode`/`model` parameters) when you explicitly request a handoff
+  - **`/handoff <goal>`** command - Manually create a handoff session (potentially with `-mode <name>` / `-model <provider/id>` / `-thinking <level>` to configure the new session)
+  - **`handoff` tool** - The agent can invoke this (with optional `mode`/`model`/`thinkingLevel` parameters) when you explicitly request a handoff
 - **`session_query`** tool - The agent in handed-off sessions automatically gets the ability to query the parent session for context, decisions, or code changes; analysis uses the queried session's own model
 - Use `/resume` to switch between and navigate handed-off sessions
 
 ### Subagents and BTW
-- **`subagent`** tool - The agent can create one or multiple parallel task-focused, non-interactive subagents to save context and speed up work
-- **`/btw <prompt>`** command - Same semantics as in Claude Code, basically a user-triggered subagent running and finishing asynchronously and independently on the main agent
+- **`subagent`** tool - The agent can create one or multiple parallel task-focused, non-interactive subagents to save context and speed up work (optional `mode`/`model`/`thinkingLevel` per explicit user request)
+- **`/btw <prompt>`** command - Same semantics as in Claude Code, basically a user-triggered subagent running and finishing asynchronously and independently on the main agent; supports `-mode`, `-model`, and `-thinking` like `/handoff`
 
 ### Permissions
 - **`/permissions`** command toggles bash command allow/deny permissions, directly read from AmpCode's configuration files.
@@ -58,16 +58,6 @@ npm install
 
 Then add `"packages/pi-amplike"` to the `"packages"` array in `~/.pi/agent/settings.json`.
 
-## Setup
-
-Get a Jina API key for web skills (optional, works with rate limits without it):
-
-```bash
-export JINA_API_KEY="your-key"  # Add to ~/.profile or ~/.zprofile
-```
-
-Get an API key at [jina.ai](https://jina.ai/). Even if you charge only the minimum credit, it's going to last approximately forever.
-
 ## Usage
 
 ### Session Handoff
@@ -79,15 +69,21 @@ When your conversation gets long or you want to branch off to a focused task, yo
 /handoff now implement this for teams as well
 /handoff -mode rush execute phase one of the plan
 /handoff -model anthropic/claude-haiku-4-5 check other places that need this fix
+/handoff -thinking high now implement the performance work
 ```
 
 Optional flags (can be combined):
-- `-mode <name>` — start the new session in a named mode (e.g. `rush`, `smart`, `deep`)
-- `-model <provider/id>` — start the new session with a specific model (e.g. `anthropic/claude-haiku-4-5`)
+- `-mode <name>` — start the new session in a named mode (e.g. `rush`, `smart`, `deep`); may set model and thinking from `modes.json`
+- `-model <provider/id>` — start the new session with a specific model (e.g. `anthropic/claude-haiku-4-5`); overrides the mode's model only
+- `-thinking <level>` — thinking level for the new session: `off`, `minimal`, `low`, `medium`, `high`, or `xhigh`; overrides the mode's thinking preset
+
+**Precedence** (each step only overrides that dimension): start from the current session's model and thinking → `-mode` may set both from `modes.json` → `-model` overrides model only → `-thinking` overrides thinking only.
 
 Without these flags, `/handoff` keeps the current model and thinking level in the new session.
 
 The handoff summary is always generated with the *current* session's model before switching.
+
+After generation, you review and edit the prompt once in the editor. When you accept, a new session opens and that message is submitted automatically—you do not need to submit again in the new session. Cancelling the editor leaves you in the current session.
 
 **Agent-invoked handoff:**
 The agent can also initiate a handoff when you explicitly ask for it:
@@ -96,7 +92,7 @@ The agent can also initiate a handoff when you explicitly ask for it:
 "Create a handoff session to execute phase one"
 ```
 
-The `handoff` tool also accepts optional `mode` and `model` parameters.
+The `handoff` tool also accepts optional `mode`, `model`, and `thinkingLevel` parameters (agent should set these only when you explicitly ask). You still get the same single editor review during the tool run; cancelling does not switch sessions.
 
 Both methods create a new session with:
 - AI-generated summary of relevant context from the current conversation
@@ -120,9 +116,9 @@ session_query("/path/to/session.jsonl", "What approach was chosen?")
 
 ### Subagents
 
-Ask your agent to "use subagents to ..." whenever you know you have a context-hungry task ahead that you would like to run isolated from the main context window.
+Ask your agent to "use subagents to ..." whenever you know you have a context-hungry task ahead that you would like to run isolated from the main context window. The `subagent` tool accepts optional `mode`, `model`, and `thinkingLevel` when you explicitly request them. **Precedence** is the same as handoff: parent session → `mode` → explicit `model` → explicit `thinkingLevel` (see handoff flags above).
 
-When your agent is working on something and you suddenly got a question, use `/btw` to ask it. Of course, you can even ask multiple questions in parallel. The `/btw` subagent is ephemeral like tool subagents, but unlike tool subagents it sees the full contxt of your session (besides the fact that it can also use tools to read files).
+When your agent is working on something and you suddenly got a question, use `/btw` to ask it. Of course, you can even ask multiple questions in parallel. Optional flags match handoff: `-mode <name>`, `-model <provider/id>`, `-thinking <level>` (same precedence). The `/btw` subagent is ephemeral like tool subagents, but unlike tool subagents it sees the full contxt of your session (besides the fact that it can also use tools to read files).
 
 ### Permissions
 
@@ -151,25 +147,13 @@ Notes:
 - Modes config is loaded from `.pi/modes.json` (project), falling back to `~/.pi/agent/modes.json` (global).
 - Deleting all modes or setting `"modes": {}` in your modes file disables mode overlay behavior (shortcuts + editor mode border), while keeping `/mode` config UI available.
 
-### Web Search
-
-```bash
-~/.pi/packages/pi-amplike/skills/web-search/search.py "python async tutorial"
-```
-
-### Visit Webpage
-
-```bash
-~/.pi/packages/pi-amplike/skills/visit-webpage/visit.py https://docs.example.com/api
-```
-
 ## Components
 
 | Component | Type | Description |
 |-----------|------|-------------|
 | [amp-skills](extensions/amp-skills.ts) | Extension | Adds Amp-compatible skill discovery paths (`~/.config/agents/skills`, `~/.config/amp/skills`, `.agents/skills`) |
 | [permissions](extensions/permissions.ts) | Extension | Reads `amp.commands.allowlist` and `amp.permissions` from `~/.config/amp/settings.json` (and `.agents/settings.json`) and intercepts bash tool calls accordingly; `/permissions` toggles between `enabled` and `yolo` (all commands allowed, status bar indicator, persisted in `~/.pi/agent/amplike.json`) |
-| [handoff](extensions/handoff.ts) | Extension | `/handoff [-mode <name>] [-model <provider/id>] <goal>` command + `handoff` tool (with `mode`/`model` params) for AI-powered context transfer |
+| [handoff](extensions/handoff.ts) | Extension | `/handoff [-mode <name>] [-model <provider/id>] [-thinking <level>] <goal>` command + `handoff` tool (with `mode`/`model`/`thinkingLevel` params) for AI-powered context transfer |
 | [modes](extensions/modes.ts) | Extension | Prompt mode manager with model/thinking/color presets, editor border overlay, and shortcuts |
 | [session-query](extensions/session-query.ts) | Extension | `session_query` tool for querying parent sessions; uses the queried session's own model for analysis |
 | [session-query](skills/session-query/) | Skill | Instructions for using the session_query tool |
@@ -180,10 +164,6 @@ Amp Code has excellent session management built-in - you can branch conversation
 
 - **Context handoff** → Amp's conversation branching
 - **Session querying** → Amp's ability to reference parent context
-
-## Web Skills Origin
-
-The web-search and visit-webpage skills were extracted from [pasky/muaddib](https://github.com/pasky/muaddib). The original implementations have additional features (rate limiting, multiple backends, async execution) that aren't needed for Pi's skill system.
 
 ## License
 
