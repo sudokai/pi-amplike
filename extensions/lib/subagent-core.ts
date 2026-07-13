@@ -427,6 +427,13 @@ export function renderProgressPlainLines(task: string, result: SingleResult): st
 // Completion-detection tuning. AgentSession changes `isStreaming` WITHOUT
 // emitting an event (observed: agent_end fires while still streaming, then the
 // flag clears silently), so we must poll. SETTLE_MS is how often we re-check.
+/**
+ * Wall-clock limit for the subagent to emit its first agent_start or message_start.
+ * Arms before setup; if reload/createAgentSession/bindExtensions never settle, the timer
+ * still fires but those awaits are not cancelled — parent may hang until they return.
+ * Post-timeout paths race settle/prompt against {@link StartDeadline.timedOutPromise}.
+ */
+export const START_DEADLINE_MS = 30_000;
 const SETTLE_MS = 150;
 // After compaction_end{willRetry} / auto_retry_start, AgentSession continues the
 // loop via an internal `setTimeout(continue, 100)`. We hold a deterministic
@@ -494,6 +501,60 @@ export interface SettleController {
 	/** Resolves once the session is judged settled (idle + no pending continue). */
 	done: Promise<void>;
 	dispose(): void;
+}
+
+export interface StartDeadline {
+	/** Call on first agent_start or message_start; clears the timer. */
+	markStarted(): void;
+	isTimedOut(): boolean;
+	/** Resolves once if the deadline fires before markStarted (for racing hung awaits). */
+	timedOutPromise: Promise<void>;
+	dispose(): void;
+}
+
+/**
+ * Wall-clock guard for "subagent never started" (no agent_start / message_start).
+ * Factored out for unit tests (see test/start-deadline.test.mjs).
+ */
+export function createStartDeadline(opts: { ms: number; onTimeout: () => void }): StartDeadline {
+	let started = false;
+	let timedOut = false;
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	let resolveTimedOut!: () => void;
+	const timedOutPromise = new Promise<void>((r) => {
+		resolveTimedOut = r;
+	});
+
+	const clearTimer = () => {
+		if (timer) clearTimeout(timer);
+		timer = undefined;
+	};
+
+	timer = setTimeout(() => {
+		if (started) return;
+		timedOut = true;
+		resolveTimedOut();
+		try {
+			opts.onTimeout();
+		} catch {
+			/* best-effort side effects must not strand timedOutPromise waiters */
+		}
+	}, opts.ms);
+
+	return {
+		markStarted() {
+			if (timedOut) return;
+			started = true;
+			clearTimer();
+		},
+		isTimedOut() {
+			return timedOut;
+		},
+		timedOutPromise,
+		dispose() {
+			clearTimer();
+		},
+	};
 }
 
 /**
@@ -607,6 +668,11 @@ export interface RunSubagentOptions {
 	signal?: AbortSignal;
 	/** Progress callback, fired on each message/tool/compaction event. */
 	onProgress: (result: SingleResult) => void;
+	/**
+	 * Max ms to wait for the first agent_start or message_start before soft-failing.
+	 * Default {@link START_DEADLINE_MS} (30_000). Not exposed on the subagent tool schema.
+	 */
+	startDeadlineMs?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -745,6 +811,47 @@ export async function runSubagent(opts: RunSubagentOptions): Promise<SingleResul
 		| { willRetry: boolean; reason?: string; aborted: boolean; summary?: string }
 		| undefined;
 
+	const startDeadlineMs = opts.startDeadlineMs ?? START_DEADLINE_MS;
+	const startDeadline = createStartDeadline({
+		ms: startDeadlineMs,
+		onTimeout: () => {
+			try {
+				session?.abortCompaction();
+			} catch {
+				/* best-effort */
+			}
+			try {
+				void session?.abort();
+			} catch {
+				/* best-effort */
+			}
+		},
+	});
+
+	const applyStartDeadlineFailure = () => {
+		result.exitCode = 1;
+		if (signal?.aborted) {
+			result.stopReason = "aborted";
+		} else {
+			result.stopReason = "error";
+			result.errorMessage = `subagent did not start within ${startDeadlineMs}ms`;
+		}
+	};
+
+	const failIfStartDeadlineExceeded = (): boolean => {
+		if (!startDeadline.isTimedOut()) return false;
+		settle?.dispose();
+		applyStartDeadlineFailure();
+		return true;
+	};
+
+	const awaitSettleOrStartDeadline = async (controller: SettleController) => {
+		await Promise.race([controller.done, startDeadline.timedOutPromise]);
+		if (startDeadline.isTimedOut()) {
+			controller.dispose();
+		}
+	};
+
 	try {
 		const settingsManager = SettingsManager.create(cwd, agentDir);
 		const resourceLoader = new DefaultResourceLoader({
@@ -755,6 +862,7 @@ export async function runSubagent(opts: RunSubagentOptions): Promise<SingleResul
 			noExtensions: true,
 		});
 		await resourceLoader.reload();
+		if (failIfStartDeadlineExceeded()) return result;
 
 		// Persisted (not in-memory) so the subagent transcript is queryable later.
 		// Thread it under the parent session (mirrors AgentSessionRuntime.newSession).
@@ -782,6 +890,7 @@ export async function runSubagent(opts: RunSubagentOptions): Promise<SingleResul
 		});
 		session = created.session;
 		await session.bindExtensions({});
+		if (failIfStartDeadlineExceeded()) return result;
 
 		result.sessionId = session.sessionManager.getSessionId();
 		result.sessionFile = session.sessionManager.getSessionFile();
@@ -894,6 +1003,7 @@ export async function runSubagent(opts: RunSubagentOptions): Promise<SingleResul
 				}
 				case "agent_start":
 				case "message_start": {
+					startDeadline.markStarted();
 					// A (possibly continued) turn started — any prior compaction was
 					// resumed, so it's no longer the turn's terminal event.
 					lastCompaction = undefined;
@@ -921,6 +1031,7 @@ export async function runSubagent(opts: RunSubagentOptions): Promise<SingleResul
 			onAbort();
 			throw new Error("aborted during setup");
 		}
+		if (failIfStartDeadlineExceeded()) return result;
 
 		// Read authoritative final state from the session (our subscriber capture
 		// can lag the async event queue).
@@ -947,9 +1058,13 @@ export async function runSubagent(opts: RunSubagentOptions): Promise<SingleResul
 			}
 		};
 
-		await session.prompt(subagentTask, { source: "extension" });
+		const firstPrompt = session.prompt(subagentTask, { source: "extension" });
+		void firstPrompt.catch(() => {}); // mark handled if abandoned after timeout wins
+		await Promise.race([firstPrompt, startDeadline.timedOutPromise]);
+		if (failIfStartDeadlineExceeded()) return result;
 		settle!.kick();
-		await settle!.done;
+		await awaitSettleOrStartDeadline(settle!);
+		if (failIfStartDeadlineExceeded()) return result;
 		readFinalState();
 
 		// Resume loop. A successful threshold compaction (willRetry:false) can end a
@@ -990,9 +1105,13 @@ export async function runSubagent(opts: RunSubagentOptions): Promise<SingleResul
 			// Clear so readFinalState() below reflects only THIS nudge's text.
 			result.finalOutput = "";
 			armSettle();
-			await session.prompt(RESUME_NUDGE_TEXT, { source: "extension" });
+			const nudgePrompt = session.prompt(RESUME_NUDGE_TEXT, { source: "extension" });
+			void nudgePrompt.catch(() => {}); // mark handled if abandoned after timeout wins
+			await Promise.race([nudgePrompt, startDeadline.timedOutPromise]);
+			if (failIfStartDeadlineExceeded()) return result;
 			settle!.kick();
-			await settle!.done;
+			await awaitSettleOrStartDeadline(settle!);
+			if (failIfStartDeadlineExceeded()) return result;
 			readFinalState();
 		}
 		syncUsage();
@@ -1002,18 +1121,25 @@ export async function runSubagent(opts: RunSubagentOptions): Promise<SingleResul
 		}
 
 		// Finalize.
-		if (result.stopReason === "error" || result.stopReason === "aborted") {
+		if (startDeadline.isTimedOut()) {
+			applyStartDeadlineFailure();
+		} else if (result.stopReason === "error" || result.stopReason === "aborted") {
 			result.exitCode = 1;
 		} else if (result.exitCode === -1) {
 			result.exitCode = 0;
 		}
 	} catch (err) {
 		result.exitCode = 1;
-		result.errorMessage = err instanceof Error ? err.message : String(err);
-		if (signal?.aborted) {
-			result.stopReason = "aborted";
+		if (startDeadline.isTimedOut()) {
+			applyStartDeadlineFailure();
+		} else {
+			result.errorMessage = err instanceof Error ? err.message : String(err);
+			if (signal?.aborted) {
+				result.stopReason = "aborted";
+			}
 		}
 	} finally {
+		startDeadline.dispose();
 		settle?.dispose();
 		if (signal && onAbort) signal.removeEventListener("abort", onAbort);
 		unsubscribe?.();
