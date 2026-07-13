@@ -5,6 +5,7 @@
  *   /btw check if there are any TODO comments in src/
  *   /btw -mode rush summarize the README
  *   /btw -model anthropic/claude-haiku-4-5 count lines of code
+ *   /btw -thinking high summarize the README
  *
  * Fires off an in-process subagent (same infra as the subagent tool) and
  * shows live progress in a widget above the editor. When finished, the
@@ -119,12 +120,13 @@ export default function (pi: ExtensionAPI) {
 
 	// --- /btw command ---
 	pi.registerCommand("btw", {
-		description: "Run a single-shot subagent in the background (-mode <name>, -model <provider/id>)",
+		description: "Run a single-shot subagent in the background (-mode <name>, -model <provider/id>, -thinking <level>)",
 		handler: async (args, ctx) => {
 			// Parse optional -mode and -model flags
 			let remaining = args;
 			let modeOpt: string | undefined;
 			let modelOpt: string | undefined;
+			let thinkingOpt: string | undefined;
 
 			const modeMatch = remaining.match(/(?:^|\s)-mode\s+(\S+)/);
 			if (modeMatch) {
@@ -138,9 +140,15 @@ export default function (pi: ExtensionAPI) {
 				remaining = remaining.replace(modelMatch[0], " ");
 			}
 
+			const thinkingMatch = remaining.match(/(?:^|\s)-thinking\s+(\S+)/);
+			if (thinkingMatch) {
+				thinkingOpt = thinkingMatch[1];
+				remaining = remaining.replace(thinkingMatch[0], " ");
+			}
+
 			const task = remaining.trim();
 			if (!task) {
-				ctx.ui.notify("Usage: /btw [-mode <name>] [-model <provider/id>] <prompt>", "error");
+				ctx.ui.notify("Usage: /btw [-mode <name>] [-model <provider/id>] [-thinking <level>] <prompt>", "error");
 				return;
 			}
 
@@ -155,7 +163,7 @@ export default function (pi: ExtensionAPI) {
 				ctx.modelRegistry,
 				ctx.model,
 				pi.getThinkingLevel(),
-				{ mode: modeOpt, model: modelOpt },
+				{ mode: modeOpt, model: modelOpt, thinkingLevel: thinkingOpt },
 			);
 
 			if (!targetModel) {

@@ -58,17 +58,28 @@ export async function loadModeSpec(
 	return undefined;
 }
 
+export type ResolveModelAndThinkingParams = {
+	mode?: string;
+	model?: string;
+	/** Explicit thinking level; wins over mode preset thinking. Values: off, minimal, low, medium, high, xhigh */
+	thinkingLevel?: string;
+};
+
 /**
- * Resolve a target model and thinking level from mode/model parameters.
- * Returns the resolved model and thinking level, using defaults from the
- * current context if not overridden.
+ * Resolve a target model and thinking level from mode/model/thinkingLevel parameters.
+ *
+ * Precedence (later steps override earlier for that dimension only):
+ * 1. Start from `currentModel` and `currentThinkingLevel` (parent session).
+ * 2. `mode` — may set model and thinking from modes.json.
+ * 3. `model` — overrides model only (provider/modelId).
+ * 4. `thinkingLevel` — overrides thinking only (wins over mode's thinkingLevel).
  */
 export async function resolveModelAndThinking(
 	cwd: string,
 	modelRegistry: any,
 	currentModel: any,
 	currentThinkingLevel: string,
-	params: { mode?: string; model?: string },
+	params: ResolveModelAndThinkingParams,
 ): Promise<{ model: any; thinkingLevel: string }> {
 	let targetModel = currentModel;
 	let targetThinkingLevel = currentThinkingLevel;
@@ -93,6 +104,10 @@ export async function resolveModelAndThinking(
 			);
 			if (m) targetModel = m;
 		}
+	}
+
+	if (params.thinkingLevel) {
+		targetThinkingLevel = params.thinkingLevel;
 	}
 
 	return { model: targetModel, thinkingLevel: targetThinkingLevel };

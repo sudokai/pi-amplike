@@ -38,6 +38,9 @@ const SubagentParams = Type.Object({
 	}),
 	mode: Type.Optional(Type.String({ description: "Amplike mode name for the subagent (e.g. 'rush', 'smart', 'deep'), only based on explicit user instructions." })),
 	model: Type.Optional(Type.String({ description: "Model for the subagent, as provider/modelId (e.g. 'anthropic/claude-haiku-4-5'), only based on explicit user instructions." })),
+	thinkingLevel: Type.Optional(Type.String({
+		description: "Thinking level for the subagent: off, minimal, low, medium, high, or xhigh. Only based on explicit user instructions. Overrides mode preset thinking.",
+	})),
 });
 
 export default function (pi: ExtensionAPI) {
@@ -67,7 +70,11 @@ export default function (pi: ExtensionAPI) {
 				ctx.modelRegistry,
 				ctx.model,
 				pi.getThinkingLevel(),
-				{ mode: params.mode, model: params.model },
+				{
+					mode: params.mode,
+					model: params.model,
+					thinkingLevel: params.thinkingLevel,
+				},
 			);
 
 			if (!targetModel) {
