@@ -1,5 +1,6 @@
 import { appendFile, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { envelopeChildContent } from "./envelope.js";
 import type { NormalizedEvent, RunDetails } from "./types.js";
 
 export async function createRunStore(agentDir: string, runId: string): Promise<string> {
@@ -51,7 +52,7 @@ export async function saveRun(details: RunDetails, completed = true): Promise<vo
  const manifestPath = join(details.runDir, "run.json");
  await atomicJson(manifestPath, manifest);
  await Promise.all(details.children.flatMap((child) => [
-  writeFile(child.artifactPath, child.response || child.error || "", "utf8"),
+  writeFile(child.artifactPath, envelopeChildContent(child), "utf8"),
   appendFile(join(details.runDir, `${child.id}.jsonl`), "", "utf8"),
  ]));
 }

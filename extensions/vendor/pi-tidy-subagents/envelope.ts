@@ -9,6 +9,16 @@ const attr = (value: string): string => value
  .replace(/"/g, "&quot;")
  .replace(/</g, "&lt;")
  .replace(/>/g, "&gt;");
+/** Canonical child result body (tool CDATA, artifacts, TUI stamps): error before partial response on failed/cancelled/warning. */
+export function envelopeChildContent(child: Pick<ChildState, "status" | "response" | "error">): string {
+ const response = child.response?.trim() ?? "";
+ const error = child.error?.trim() ?? "";
+ if (["failed", "cancelled", "warning"].includes(child.status) && error) {
+  return response ? `${error}\n\n---\n\n${response}` : error;
+ }
+ return response || error || "";
+}
+
 function truncateCdata(value: string, maxBytes: number): string {
  if (maxBytes <= 0) return "";
  let output = "";
@@ -50,7 +60,7 @@ export function buildEnvelope(children: ChildState[], totalLimit = TOTAL_LIMIT):
 
  let remaining = totalLimit - baseBytes;
  return children.map((child, index) => {
-  const original = child.response || child.error || "";
+  const original = envelopeChildContent(child);
   const allowed = Math.max(0, Math.min(CHILD_LIMIT, remaining));
   const content = truncateCdata(original, allowed);
   remaining -= bytes(content);

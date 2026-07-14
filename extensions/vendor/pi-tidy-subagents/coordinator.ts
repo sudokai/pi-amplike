@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { getAgentDir, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { buildEnvelope } from "./envelope.js";
+import { buildEnvelope, envelopeChildContent } from "./envelope.js";
 import { runChild, type ChildControlHandle, type SharedLaunchContext } from "./runner.js";
 import { Scheduler } from "./scheduler.js";
 import { saveLegacyState, saveRun } from "./store.js";
@@ -401,7 +401,7 @@ export class SessionCoordinator {
    target: child.target!,
    timestamp: Date.now(),
    child: publicChild(child),
-   result: kind === "terminal" ? bounded(child.response || child.error || "") : undefined,
+   result: kind === "terminal" ? bounded(envelopeChildContent(child)) : undefined,
   } satisfies BackgroundStampData);
  }
 

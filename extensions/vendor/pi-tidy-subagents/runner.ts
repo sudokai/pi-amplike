@@ -49,6 +49,59 @@ const usageComponents = (usage: any) => ({
  cacheWrite: Number(usage?.cacheWrite ?? usage?.cache_write) || 0,
 });
 
+/** Assigns terminal `ChildState.status` from RPC exit context and the last assistant `stopReason`. */
+export function finalizeChildTerminalStatus(
+ child: ChildState,
+ ctx: {
+  cancelled: boolean;
+  promptFailure: string;
+  promptSent: boolean;
+  settled: boolean;
+  stderr: string;
+  exitCode: number | null;
+  stopReason?: string;
+  errorMessage?: string;
+ },
+): void {
+ if (ctx.cancelled) {
+  child.status = "cancelled";
+  child.error = "Cancelled";
+  return;
+ }
+ if (ctx.promptFailure) {
+  child.status = "failed";
+  child.error = ctx.promptFailure;
+  return;
+ }
+ if (!ctx.promptSent) {
+  child.status = "failed";
+  child.error = child.error || "Child failed before prompt";
+  return;
+ }
+ if (!ctx.settled) {
+  child.status = "failed";
+  child.error = ctx.stderr.trim() || `Pi RPC exited ${ctx.exitCode ?? "by signal"} before settling`;
+  return;
+ }
+ if (ctx.stopReason === "error" || ctx.stopReason === "aborted") {
+  child.status = "failed";
+  child.error = ctx.errorMessage?.trim()
+   || (ctx.stopReason === "aborted" ? "aborted" : "Agent stopped with error");
+  return;
+ }
+ if (ctx.stopReason === "length") {
+  child.status = "warning";
+  child.error = "Child stopped at output length limit (response may be truncated)";
+  return;
+ }
+ if (!child.response.trim()) {
+  child.status = "warning";
+  child.error = "Child completed without assistant output";
+  return;
+ }
+ child.status = "completed";
+}
+
 function applyObservedRuntime(child: ChildState, provider: string, modelId: string, thinkingLevel: string | undefined): void {
  const observed = {
   provider,
@@ -97,6 +150,8 @@ export async function runChild(
  const args = [...prefix, ...buildChildArgs(runtime)];
  const proc = spawn(executable, args, { cwd: runtime.cwd, env: buildChildEnv(process.env), stdio: ["pipe", "pipe", "pipe"] });
  let stderr = "", buffer = "", settled = false, cancelled = false, promptFailure = "", sawTextDelta = false, parseFailure: unknown;
+ let lastStopReason: string | undefined;
+ let lastErrorMessage: string | undefined;
  let writes = Promise.resolve();
  let promptSent = false;
  let commandSequence = 0;
@@ -171,6 +226,8 @@ export async function runChild(
    changed(false);
   } else if (raw.type === "message_end" && raw.message?.role === "assistant") {
    const text = messageText(raw.message); child.response = text;
+   if (typeof raw.message.stopReason === "string") lastStopReason = raw.message.stopReason;
+   if (typeof raw.message.errorMessage === "string") lastErrorMessage = raw.message.errorMessage;
    if (sawTextDelta) {
     if (child.streamingLine?.trim()) appendActivities(child.streamingLine);
    } else if (text) {
@@ -316,12 +373,16 @@ export async function runChild(
   throw new Error(`Could not maintain durable child event stream: ${parseFailure instanceof Error ? parseFailure.message : String(parseFailure)}`);
  }
  // Startup observation failures return early after setting status/error.
- if (cancelled) child.error = "Cancelled";
- else if (promptFailure) { child.status = "failed"; child.error = promptFailure; }
- else if (!promptSent) { child.status = "failed"; child.error = child.error || "Child failed before prompt"; }
- else if (!settled) { child.status = "failed"; child.error = stderr.trim() || `Pi RPC exited ${code ?? "by signal"} before settling`; }
- else if (!child.response.trim()) { child.status = "warning"; child.error = "Child completed without assistant output"; }
- else child.status = "completed";
+ finalizeChildTerminalStatus(child, {
+  cancelled,
+  promptFailure,
+  promptSent,
+  settled,
+  stderr,
+  exitCode: code,
+  stopReason: lastStopReason,
+  errorMessage: lastErrorMessage,
+ });
  terminalizeActiveTools();
  changed(true); return child;
 }

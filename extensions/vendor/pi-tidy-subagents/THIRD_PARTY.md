@@ -13,5 +13,7 @@ from [mikeyobrien/pi-tidy-tools](https://github.com/mikeyobrien/pi-tidy-tools).
 - `runner.ts` `buildChildArgs`: `--mode rpc --no-session --approve` plus model/thinking; `buildChildEnv` sets `PI_TIDY_SUBAGENT_CHILD=1`.
 - `index.ts`: library entry only (not auto-loaded under `extensions/vendor/`); re-exports `isChildRpcProcess` from amplike `permissions-core`. Parent registration is `extensions/subagent.ts`.
 - `scheduler.ts` `concurrencyCap`: CPU-only `max(1, floor(availableParallelism() / 2))`. Dropped `os.freemem()` — on macOS free memory is often near-zero while most RAM is reclaimable cache, which forced `cap = 1` on large multi-core hosts.
+- `runner.ts` `finalizeChildTerminalStatus`: on child exit, set status from settlement, process errors, and assistant `stopReason` / `errorMessage` (`error` and `aborted` → `failed`; `length` → `warning`).
+- `envelope.ts` `envelopeChildContent`: for `failed` / `cancelled` / `warning`, put harness `error` before partial `response`; used for parent tool CDATA, on-disk artifacts (`store.saveRun`), and TUI terminal stamps.
 
 Do **not** also install `@mobrienv/pi-tidy-subagents` alongside pi-amplike (duplicate `subagent` tool).
