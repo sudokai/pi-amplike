@@ -6,7 +6,7 @@ import { runChild, type ChildControlHandle, type SharedLaunchContext } from "./r
 import { Scheduler } from "./scheduler.js";
 import { saveLegacyState, saveRun } from "./store.js";
 import type { ChildState, DeliveryPolicy, RunDetails } from "./types.js";
-import { BackgroundWidgetComponent, type BackgroundStampData } from "./ui.js";
+import { backgroundWidgetStateKey, BackgroundWidgetComponent, type BackgroundStampData } from "./ui.js";
 
 const ACTIVE = new Set(["queued", "starting", "running"]);
 const terminal = (child: ChildState): boolean => !ACTIVE.has(child.status);
@@ -104,6 +104,8 @@ export class SessionCoordinator {
  private readonly legacyRunIds = new Set<string>();
  private registrationWaiters = new Map<string, Set<() => void>>();
  private context?: CoordinatorContext;
+ private backgroundWidgetKey?: string;
+ private backgroundWidgetWidth?: number;
  private shuttingDown = false;
 
  constructor(private readonly pi: ExtensionAPI, private readonly scheduler: Scheduler) {}
@@ -409,8 +411,26 @@ export class SessionCoordinator {
   const ctx = this.context;
   if (ctx?.mode !== "tui" || !ctx.ui) return;
   const active = clear ? [] : [...this.records.values()].filter((record) => record.child.ownership === "background" && !record.settledCommitted).map((record) => record.widgetSnapshot);
-  if (active.length === 0) ctx.ui.setWidget("pi-tidy-subagents-background", undefined);
-  else ctx.ui.setWidget("pi-tidy-subagents-background", (_tui: any, theme: any) => new BackgroundWidgetComponent(() => active.map(publicChild), theme, () => Boolean(ctx.ui?.getToolsExpanded?.())), { placement: "aboveEditor" });
+  if (active.length === 0) {
+   this.backgroundWidgetWidth = undefined;
+   if (this.backgroundWidgetKey === undefined && !clear) return;
+   this.backgroundWidgetKey = undefined;
+   ctx.ui.setWidget("pi-tidy-subagents-background", undefined);
+   return;
+  }
+  const expanded = Boolean(ctx.ui.getToolsExpanded?.());
+  const key = backgroundWidgetStateKey(active, expanded, this.backgroundWidgetWidth);
+  if (key === this.backgroundWidgetKey) return;
+  this.backgroundWidgetKey = key;
+  ctx.ui.setWidget("pi-tidy-subagents-background", (_tui: any, theme: any) => new BackgroundWidgetComponent(
+   () => active.map(publicChild),
+   theme,
+   () => Boolean(ctx.ui?.getToolsExpanded?.()),
+   (width, renderedExpanded) => {
+    this.backgroundWidgetWidth = width;
+    this.backgroundWidgetKey = backgroundWidgetStateKey(active, renderedExpanded, width);
+   },
+  ), { placement: "aboveEditor" });
  }
 
  private async resolve(target: string, action: string, batchKey?: string): Promise<ChildRecord> {

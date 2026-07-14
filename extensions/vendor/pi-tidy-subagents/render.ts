@@ -5,6 +5,7 @@ import type { ChildState, RunDetails } from "./types.js";
 const GUTTER = `${DIM}  ┊${RESET}`;
 const ansiPattern = /\x1b\[[0-9;]*m/g;
 const RUNNING_GLYPH = "●";
+export const MAX_FOREGROUND_BATCH_LINES = 16;
 function formatTokens(count: number): string {
  if (count < 1_000) return String(count);
  if (count < 10_000) return `${(count / 1_000).toFixed(1)}k`;
@@ -129,6 +130,12 @@ function fitDisplayLine(line: string, width: number): string {
  const head = line.slice(0, tailIndex).trimEnd();
  return `${truncateToWidth(head, width - tailWidth - 1, "…")} ${tail}`;
 }
+export function limitRenderedLines(lines: string[], maximum: number, notice: string): string[] {
+ if (lines.length <= maximum) return lines;
+ const kept = Math.max(0, maximum - 1);
+ const hidden = lines.length - kept;
+ return [...lines.slice(0, kept), `${DIM}… ${hidden} lines hidden · ${notice}${RESET}`];
+}
 function paintLines(lines: string[], width: number, background?: (text: string) => string): string[] {
  const max = Math.max(1, width);
  return lines.map((line) => {
@@ -147,16 +154,22 @@ export function renderBackgroundAcknowledgementLines(child: ChildState): string[
 }
 
 export class SnapshotComponent {
- constructor(private details: RunDetails | undefined, private expanded: boolean, private background?: (text: string) => string) {}
+ private readonly renderedAt: number;
+ constructor(private details: RunDetails | undefined, private expanded: boolean, private background?: (text: string) => string, renderedAt = Date.now()) {
+  this.renderedAt = renderedAt;
+ }
  invalidate(): void {}
  render(width: number): string[] {
-  return paintLines(renderLines(this.details, this.expanded, Date.now(), Math.max(1, width)), width, this.background);
+  return paintLines(renderLines(this.details, this.expanded, this.renderedAt, Math.max(1, width)), width, this.background);
  }
 }
 
 /** Synchronous card renderer: detached children become settled acknowledgements and never retain live activity ownership. */
 export class ToolSnapshotComponent {
- constructor(private details: RunDetails | undefined, private expanded: boolean, private background?: (text: string) => string) {}
+ private readonly renderedAt: number;
+ constructor(private details: RunDetails | undefined, private expanded: boolean, private background?: (text: string) => string, renderedAt = Date.now()) {
+  this.renderedAt = renderedAt;
+ }
  invalidate(): void {}
  render(width: number): string[] {
   if (!this.details) return [];
@@ -164,8 +177,11 @@ export class ToolSnapshotComponent {
   for (const [index, child] of this.details.children.entries()) {
    if (index > 0) lines.push("");
    if (child.ownership === "background") lines.push(...renderBackgroundAcknowledgementLines(child));
-   else lines.push(...renderLines({ ...this.details, children: [child] }, this.expanded, Date.now(), Math.max(1, width)));
+   else lines.push(...renderLines({ ...this.details, children: [child] }, this.expanded, this.renderedAt, Math.max(1, width)));
   }
-  return paintLines(lines, width, this.background);
+  const bounded = this.details.children.length > 1
+   ? limitRenderedLines(lines, MAX_FOREGROUND_BATCH_LINES, "artifacts retain full output")
+   : lines;
+  return paintLines(bounded, width, this.background);
  }
 }
