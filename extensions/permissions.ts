@@ -24,7 +24,8 @@
  *   Persisted by the /permissions command across pi invocations.
  *
  * The matching rules + built-in defaults live in lib/permissions-core.ts so the
- * subagent runner can enforce the identical policy (non-interactively).
+ * child RPC bash gate (lib/subagent-bash-gate.ts) can enforce the identical
+ * policy non-interactively (fail-closed, never prompts).
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";

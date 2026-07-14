@@ -2,9 +2,9 @@
  * Amp permissions — pure decision logic.
  *
  * Shared by the interactive `permissions` extension (which adds UI for "ask")
- * and the subagent runner (which gates bash non-interactively, since subagents
- * have no UI to prompt with). Keeping the rules here is the single source of
- * truth so the two paths can never diverge.
+ * and the child RPC bash gate (`subagent-bash-gate.ts`, fail-closed, never
+ * prompts). Keeping the rules here is the single source of truth so the two
+ * paths can never diverge.
  */
 
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";

@@ -3,7 +3,7 @@
 [Pi](https://github.com/badlogic/pi-mono) skills and extensions that give Pi similar capabilities to [Amp Code](https://ampcode.com/) out of the box.
 
 <p align="center">
-<img src="demo.gif" alt="Pi subagents and /btw in action" width="700" />
+<img src="demo.gif" alt="Pi amplike handoff and modes demo" width="700" />
 </p>
 
 ## Features
@@ -12,12 +12,16 @@
 - **Handoff** - Create a new focused session with AI-generated context transfer:
   - **`/handoff <goal>`** command - Manually create a handoff session (potentially with `-mode <name>` / `-model <provider/id>` / `-thinking <level>` to configure the new session)
   - **`handoff` tool** - The agent can invoke this (with optional `mode`/`model`/`thinkingLevel` parameters) when you explicitly request a handoff
-- **`session_query`** tool - The agent in handed-off sessions automatically gets the ability to query the parent session for context, decisions, or code changes; analysis uses the queried session's own model
+- **`session_query` tool** - The agent in handed-off sessions automatically gets the ability to query the parent session for context, decisions, or code changes; analysis uses the queried session's own model
 - Use `/resume` to switch between and navigate handed-off sessions
 
-### Subagents and BTW
-- **`subagent`** tool - The agent can create one or multiple parallel task-focused, non-interactive subagents to save context and speed up work (optional `mode`/`model`/`thinkingLevel` per explicit user request)
-- **`/btw <prompt>`** command - Same semantics as in Claude Code, basically a user-triggered subagent running and finishing asynchronously and independently on the main agent; supports `-mode`, `-model`, and `-thinking` like `/handoff`
+### Subagents (tidy-style RPC children)
+- **`subagent` tool** - Launch ordered foreground and/or background child Pi agents (`agents[]` with `label?`, `reason`, `prompt`, optional `mode` / `model` / `thinking` / `execution`)
+- **`subagent_control` tool** - Inspect, steer, cancel, set delivery, or collect session-scoped background children
+- **`/subagents`** (and `Ctrl+Shift+B`) - TUI management overlay for active/completed children
+- Per-child **amplike modes** (`modes.json`) expand to model/thinking with precedence: parent session → `mode` → explicit `model` → explicit `thinking`
+- Children are isolated RPC processes: built-in tools only, Amp fail-closed bash (never prompts), nested subagents disabled
+- Results use tidy envelopes and agent-dir artifacts (`child-*.md`, `run.json`, event jsonl) — not Pi session `.jsonl` paths for `session_query`
 
 ### Permissions
 - **`/permissions`** command toggles bash command allow/deny permissions, directly read from AmpCode's configuration files.
@@ -57,6 +61,10 @@ npm install
 ```
 
 Then add `"packages/pi-amplike"` to the `"packages"` array in `~/.pi/agent/settings.json`.
+
+**Do not also install `@mobrienv/pi-tidy-subagents`** — pi-amplike vendors that runtime and registers the same `subagent` / `subagent_control` tools.
+
+**Node:** `>=22.19.0` (matches the vendored tidy runtime).
 
 ## Usage
 
@@ -113,12 +121,47 @@ session_query("/path/to/session.jsonl", "What files were modified?")
 session_query("/path/to/session.jsonl", "What approach was chosen?")
 ```
 
-
 ### Subagents
 
-Ask your agent to "use subagents to ..." whenever you know you have a context-hungry task ahead that you would like to run isolated from the main context window. The `subagent` tool accepts optional `mode`, `model`, and `thinkingLevel` when you explicitly request them. **Precedence** is the same as handoff: parent session → `mode` → explicit `model` → explicit `thinkingLevel` (see handoff flags above).
+Ask your agent to "use subagents to …" for independent, well-defined work that benefits from isolation or parallelism.
 
-When your agent is working on something and you suddenly got a question, use `/btw` to ask it. Of course, you can even ask multiple questions in parallel. Optional flags match handoff: `-mode <name>`, `-model <provider/id>`, `-thinking <level>` (same precedence). The `/btw` subagent is ephemeral like tool subagents, but unlike tool subagents it sees the full contxt of your session (besides the fact that it can also use tools to read files).
+The `subagent` tool takes an ordered `agents[]` list (no `tasks[]` shim):
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `reason` | yes | Short present-tense intent for the transcript |
+| `prompt` | yes | Full context and objective sent verbatim to the child |
+| `label` | no | Display label (default `agent`) |
+| `mode` | no | Amplike mode name from `modes.json` (only when the user asks) |
+| `model` | no | Exact `provider/model-id` (omit inherits parent / mode) |
+| `thinking` | no | `off` \| `minimal` \| `low` \| `medium` \| `high` \| `xhigh` \| `max` |
+| `execution` | no | `foreground` (default, waits) or `background` (ack + control plane) |
+
+**Mode / model / thinking precedence** (same as handoff): parent session → `mode` → explicit `model` → explicit `thinking`. Unknown `mode` fails the whole batch (no partial children). Invalid or unauthenticated explicit models also fail preflight.
+
+**Foreground** children block the tool call until they settle; **background** children register and return durable acknowledgements. Use `subagent_control` (`status` / `steer` / `cancel` / `inspect` / `set_delivery` / `collect` / `background`) or `/subagents` to manage them.
+
+#### Child isolation and bash policy
+
+Each child is spawned roughly as:
+
+```text
+pi --mode rpc --no-session --no-extensions --approve \
+   -e <package>/extensions/lib/subagent-bash-gate.ts \
+   --tools read,write,edit,bash,grep,find,ls \
+   --model … --thinking …
+```
+
+- No package extension discovery (`--no-extensions`); only the Amp bash gate is loaded via `-e`
+- Built-in tools only (no nested `subagent` in children; `PI_TIDY_SUBAGENT_CHILD=1`)
+- Always `--approve` (no interactive approval UI in children)
+- **Bash fail-closed** (never prompts in children):
+  - Parent YOLO (`/permissions` → yolo, persisted in `~/.pi/agent/amplike.json`) → allow all bash
+  - Amp `allow` → run
+  - Amp `ask` / `deny` / `reject` → block with a clear error
+- Parent interactive `/permissions` still prompts on `ask` in the main session
+
+Artifacts for a run live under the Pi agent dir (tidy store): `run.json`, `child-*.md`, event jsonl. Use those (and tool envelopes) instead of `session_query` for subagent transcripts.
 
 ### Permissions
 
@@ -155,8 +198,16 @@ Notes:
 | [permissions](extensions/permissions.ts) | Extension | Reads `amp.commands.allowlist` and `amp.permissions` from `~/.config/amp/settings.json` (and `.agents/settings.json`) and intercepts bash tool calls accordingly; `/permissions` toggles between `enabled` and `yolo` (all commands allowed, status bar indicator, persisted in `~/.pi/agent/amplike.json`) |
 | [handoff](extensions/handoff.ts) | Extension | `/handoff [-mode <name>] [-model <provider/id>] [-thinking <level>] <goal>` command + `handoff` tool (with `mode`/`model`/`thinkingLevel` params) for AI-powered context transfer |
 | [modes](extensions/modes.ts) | Extension | Prompt mode manager with model/thinking/color presets, editor border overlay, and shortcuts |
+| [subagent](extensions/subagent.ts) | Extension | Tidy-style `subagent` + `subagent_control` with per-child amplike `mode`; vendored runtime under `extensions/vendor/pi-tidy-subagents/` |
 | [session-query](extensions/session-query.ts) | Extension | `session_query` tool for querying parent sessions; uses the queried session's own model for analysis |
 | [session-query](skills/session-query/) | Skill | Instructions for using the session_query tool |
+
+## Breaking changes (2.0.0)
+
+- In-process `tasks[]` subagent runner and **`/btw`** are removed
+- Tool schema is tidy-style **`agents[]`** (`reason`, `prompt`, optional `mode`/`model`/`thinking`/`execution`) plus **`subagent_control`**
+- Subagents no longer produce Pi `.jsonl` session files for `session_query`
+- Node engine requirement is **`>=22.19.0`**
 
 ## Why "AmpCode-like"?
 
@@ -168,3 +219,5 @@ Amp Code has excellent session management built-in - you can branch conversation
 ## License
 
 MIT
+
+Vendored [pi-tidy-subagents](https://github.com/mikeyobrien/pi-tidy-tools/tree/main/packages/pi-tidy-subagents) is MIT (see `extensions/vendor/pi-tidy-subagents/THIRD_PARTY.md`).
