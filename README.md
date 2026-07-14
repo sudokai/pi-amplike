@@ -20,7 +20,7 @@
 - **`subagent_control` tool** - Inspect, steer, cancel, set delivery, or collect session-scoped background children
 - **`/subagents`** (and `Ctrl+Shift+B`) - TUI management overlay for active/completed children
 - Per-child **amplike modes** (`modes.json`) expand to model/thinking with precedence: parent session → `mode` → explicit `model` → explicit `thinking`
-- Children are isolated RPC processes: built-in tools only, Amp fail-closed bash (never prompts), nested subagents disabled
+- Children are RPC processes with full extension discovery; nested subagents disabled; Amp bash fail-closed (never prompts)
 - Results use tidy envelopes and agent-dir artifacts (`child-*.md`, `run.json`, event jsonl) — not Pi session `.jsonl` paths for `session_query`
 
 ### Permissions
@@ -141,22 +141,23 @@ The `subagent` tool takes an ordered `agents[]` list (no `tasks[]` shim):
 
 **Foreground** children block the tool call until they settle; **background** children register and return durable acknowledgements. Use `subagent_control` (`status` / `steer` / `cancel` / `inspect` / `set_delivery` / `collect` / `background`) or `/subagents` to manage them.
 
-#### Child isolation and bash policy
+#### Child process and bash policy
 
 Each child is spawned roughly as:
 
 ```text
-pi --mode rpc --no-session --no-extensions --approve \
-   -e <package>/extensions/lib/subagent-bash-gate.ts \
-   --tools read,write,edit,bash,grep,find,ls \
+pi --mode rpc --no-session --approve \
    --model … --thinking …
 ```
 
-- No package extension discovery (`--no-extensions`); only the Amp bash gate is loaded via `-e`
-- Built-in tools only (no nested `subagent` in children; `PI_TIDY_SUBAGENT_CHILD=1`)
-- Always `--approve` (no interactive approval UI in children)
-- **Bash fail-closed** (never prompts in children):
-  - Parent YOLO (`/permissions` → yolo, persisted in `~/.pi/agent/amplike.json`) → allow all bash
+with env `PI_TIDY_SUBAGENT_CHILD=1`.
+
+- Full extension discovery (user, project, and package extensions load as in a normal session)
+- Extension-registered tools are available
+- Nested `subagent` is disabled in children (`PI_TIDY_SUBAGENT_CHILD=1`)
+- `--approve` so children skip interactive project-trust UI
+- **Bash fail-closed** via the permissions extension (never prompts in children):
+  - YOLO (`/permissions` → yolo) → allow all bash
   - Amp `allow` → run
   - Amp `ask` / `deny` / `reject` → block with a clear error
 - Parent interactive `/permissions` still prompts on `ask` in the main session
@@ -195,7 +196,7 @@ Notes:
 | Component | Type | Description |
 |-----------|------|-------------|
 | [amp-skills](extensions/amp-skills.ts) | Extension | Adds Amp-compatible skill discovery paths (`~/.config/agents/skills`, `~/.config/amp/skills`, `.agents/skills`) |
-| [permissions](extensions/permissions.ts) | Extension | Reads `amp.commands.allowlist` and `amp.permissions` from `~/.config/amp/settings.json` (and `.agents/settings.json`) and intercepts bash tool calls accordingly; `/permissions` toggles between `enabled` and `yolo` (all commands allowed, status bar indicator, persisted in `~/.pi/agent/amplike.json`) |
+| [permissions](extensions/permissions.ts) | Extension | Amp bash permissions (`amp.commands.allowlist` / `amp.permissions`); `/permissions` toggles `enabled` vs `yolo`; fail-closed (no prompt) in RPC children and other no-UI sessions |
 | [handoff](extensions/handoff.ts) | Extension | `/handoff [-mode <name>] [-model <provider/id>] [-thinking <level>] <goal>` command + `handoff` tool (with `mode`/`model`/`thinkingLevel` params) for AI-powered context transfer |
 | [modes](extensions/modes.ts) | Extension | Prompt mode manager with model/thinking/color presets, editor border overlay, and shortcuts |
 | [subagent](extensions/subagent.ts) | Extension | Tidy-style `subagent` + `subagent_control` with per-child amplike `mode`; vendored runtime under `extensions/vendor/pi-tidy-subagents/` |

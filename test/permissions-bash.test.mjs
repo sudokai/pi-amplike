@@ -1,10 +1,10 @@
 /**
- * Fail-closed Amp bash gate decisions (subagent-bash-gate.decideBash).
+ * Fail-closed Amp bash decisions (permissions-core + permissions extension).
  *
  * Hermetic: pure decideBash + project-local amp.permissions; never mutates
  * ~/.pi/agent/amplike.json.
  *
- * Run: node test/bash-gate.test.mjs
+ * Run: node test/permissions-bash.test.mjs
  */
 
 import * as fs from "node:fs";
@@ -14,7 +14,7 @@ import { createJiti } from "@mariozechner/jiti";
 
 const jiti = createJiti(import.meta.url);
 const core = await jiti.import("../extensions/lib/permissions-core.ts");
-const gate = await jiti.import("../extensions/lib/subagent-bash-gate.ts");
+const permissions = await jiti.import("../extensions/permissions.ts");
 
 let failures = 0;
 const ok = (name, cond, detail = "") => {
@@ -27,7 +27,14 @@ const eq = (name, got, want) => {
 	if (!match) failures++;
 };
 
-const { decideBash, BLOCK_REASON } = gate;
+const {
+	decideBash,
+	FAIL_CLOSED_BASH_REASON,
+	DENIED_BASH_REASON,
+	isChildRpcEnv,
+	isChildRpcProcess,
+} = core;
+const { shouldFailClosedBash } = permissions;
 const cwd = process.cwd();
 
 // YOLO allows everything
@@ -46,8 +53,8 @@ const cwd = process.cwd();
 {
 	const d = decideBash("git push origin main", cwd, { permissions: { mode: "enabled" } });
 	ok("git push blocked fail-closed", d.block === true);
-	ok("block reason mentions fail-closed", typeof d.reason === "string" && d.reason.includes("fail-closed"));
-	eq("block reason constant", d.reason, BLOCK_REASON);
+	ok("block reason mentions fail-closed policy", typeof d.reason === "string" && d.reason.includes("fail-closed"));
+	eq("block reason constant", d.reason, FAIL_CLOSED_BASH_REASON);
 }
 
 // Unmatched command defaults to ask → block
@@ -62,7 +69,7 @@ eq("resolveBashAction git push", core.resolveBashAction("git push origin main", 
 
 // deny / reject via project-local amp.permissions (no real amplike.json)
 {
-	const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), "pi-amplike-bash-gate-"));
+	const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), "pi-amplike-permissions-bash-"));
 	const agentsDir = path.join(projectRoot, ".agents");
 	fs.mkdirSync(agentsDir, { recursive: true });
 	fs.writeFileSync(
@@ -80,11 +87,11 @@ eq("resolveBashAction git push", core.resolveBashAction("git push origin main", 
 
 	const denyDecision = decideBash("rm -rf /tmp/x", projectRoot, { permissions: { mode: "enabled" } });
 	ok("deny blocks without prompt", denyDecision.block === true);
-	ok("deny reason fail-closed", denyDecision.reason?.includes("fail-closed"));
+	eq("deny reason shared", denyDecision.reason, DENIED_BASH_REASON);
 
 	const rejectDecision = decideBash("sudo ls", projectRoot, { permissions: { mode: "enabled" } });
 	ok("reject blocks without prompt", rejectDecision.block === true);
-	ok("reject reason fail-closed", rejectDecision.reason?.includes("fail-closed"));
+	eq("reject reason shared", rejectDecision.reason, DENIED_BASH_REASON);
 
 	// YOLO still wins over deny/reject
 	const yoloOverDeny = decideBash("rm -rf /tmp/x", projectRoot, { permissions: { mode: "yolo" } });
@@ -93,27 +100,64 @@ eq("resolveBashAction git push", core.resolveBashAction("git push origin main", 
 	fs.rmSync(projectRoot, { recursive: true, force: true });
 }
 
-// Gate module loads as default export function; non-bash passthrough
+// isChildRpcEnv / isChildRpcProcess
 {
-	ok("gate default export is function", typeof gate.default === "function");
+	ok("isChildRpcEnv false by default", isChildRpcEnv({}) === false);
+	ok("isChildRpcEnv true when set", isChildRpcEnv({ PI_TIDY_SUBAGENT_CHILD: "1" }) === true);
+	ok("isChildRpcEnv ignores other values", isChildRpcEnv({ PI_TIDY_SUBAGENT_CHILD: "0" }) === false);
 
+	ok(
+		"isChildRpcProcess false with env only",
+		isChildRpcProcess({ PI_TIDY_SUBAGENT_CHILD: "1" }, ["node", "pi"]) === false,
+	);
+	ok(
+		"isChildRpcProcess true with env + rpc mode",
+		isChildRpcProcess({ PI_TIDY_SUBAGENT_CHILD: "1" }, ["node", "pi", "--mode", "rpc"]) === true,
+	);
+	ok(
+		"isChildRpcProcess false with rpc mode only",
+		isChildRpcProcess({}, ["node", "pi", "--mode", "rpc"]) === false,
+	);
+}
+
+// shouldFailClosedBash predicate used by the extension
+{
+	ok(
+		"fail-closed when no UI",
+		shouldFailClosedBash(false, {}, ["node", "pi"]) === true,
+	);
+	ok(
+		"interactive when has UI and no child env",
+		shouldFailClosedBash(true, {}, ["node", "pi"]) === false,
+	);
+	ok(
+		"ambient child env alone does not fail-close parent with UI",
+		shouldFailClosedBash(true, { PI_TIDY_SUBAGENT_CHILD: "1" }, ["node", "pi"]) === false,
+	);
+	ok(
+		"true child RPC fail-closes even with hasUI",
+		shouldFailClosedBash(true, { PI_TIDY_SUBAGENT_CHILD: "1" }, ["node", "pi", "--mode", "rpc"]) === true,
+	);
+}
+
+// Extension registers tool_call; non-bash tools pass through
+{
 	const handlers = [];
 	const pi = {
+		registerCommand() {},
 		on(event, fn) {
 			handlers.push({ event, fn });
 		},
 	};
-	gate.default(pi);
-	ok("registers tool_call only", handlers.length === 1 && handlers[0].event === "tool_call");
+	permissions.default(pi);
+	const toolCall = handlers.find((h) => h.event === "tool_call");
+	ok("registers tool_call", !!toolCall);
 
-	const result = await handlers[0].fn(
-		{ toolName: "read", input: {} },
-		{ cwd },
-	);
-	ok("non-bash returns undefined", result === undefined);
+	const nonBash = await toolCall.fn({ toolName: "read", input: {} }, { hasUI: false, cwd });
+	ok("non-bash returns undefined", nonBash === undefined);
 }
 
-// decideBash is pure: no dependency on real AMPLIKE_SETTINGS_PATH for decisions
+// decideBash is pure
 {
 	ok("decideBash export is function", typeof decideBash === "function");
 	const enabled = decideBash("git status", cwd, { permissions: { mode: "enabled" } });
@@ -126,4 +170,4 @@ if (failures > 0) {
 	console.error(`\n${failures} failure(s)`);
 	process.exit(1);
 }
-console.log("\nall bash-gate tests passed");
+console.log("\nall permissions-bash tests passed");

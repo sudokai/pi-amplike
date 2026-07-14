@@ -1,10 +1,9 @@
 import { spawn } from "node:child_process";
-import { fileURLToPath } from "node:url";
 import { buildToolActivityBlock } from "./vendor/pi-tidy-core/index.js";
 import { appendEvent } from "./store.js";
 import type { ChildRuntimePlan, ChildState, NormalizedEvent } from "./types.js";
 
-/** Shared launch context that remains identical across siblings. */
+/** Shared launch context for sibling children (cwd, runDir, optional tools/approved metadata). */
 export interface SharedLaunchContext { cwd: string; tools: string[]; runDir: string; approved: boolean }
 /** Per-child launch runtime: model/thinking come from the child-owned plan. */
 export interface Runtime extends SharedLaunchContext { model: string; thinking: string }
@@ -14,51 +13,30 @@ export interface ChildControlHandle {
  abort(): Promise<{ accepted: true }>;
 }
 
-/** Fixed built-in tools for isolated children (ignore parent active tool list). */
-export const CHILD_BUILTIN_TOOLS = ["read", "write", "edit", "bash", "grep", "find", "ls"] as const;
-
-/**
- * Absolute path to the Amp fail-closed bash gate extension loaded into children.
- * Override with PI_TIDY_SUBAGENT_BASH_GATE for tests.
- * Default resolves relative to this module: extensions/lib/subagent-bash-gate.ts
- */
-export function resolveBashGatePath(
- env: NodeJS.ProcessEnv = process.env,
- metaUrl: string = import.meta.url,
-): string {
- if (env.PI_TIDY_SUBAGENT_BASH_GATE && env.PI_TIDY_SUBAGENT_BASH_GATE.trim()) {
-  return env.PI_TIDY_SUBAGENT_BASH_GATE.trim();
- }
- // runner.ts lives at extensions/vendor/pi-tidy-subagents/runner.ts
- // gate lives at extensions/lib/subagent-bash-gate.ts
- return fileURLToPath(new URL("../../lib/subagent-bash-gate.ts", metaUrl));
-}
-
 /** Derive spawn runtime from a child-owned plan plus shared working context. */
 export function launchRuntime(plan: Pick<ChildRuntimePlan, "model" | "thinking">, shared: SharedLaunchContext): Runtime {
  return { ...shared, model: plan.model, thinking: plan.thinking };
 }
 
 /**
- * Build Pi CLI args for an isolated RPC child.
- * Always: --mode rpc --no-session --no-extensions -e <gate> --approve --tools <builtins> --model --thinking.
- * Parent tools / projectTrusted are intentionally ignored for Amp isolation policy.
+ * Build Pi CLI args for an RPC child:
+ * `--mode rpc --no-session --approve --model --thinking`.
+ *
+ * Extension discovery and tool registration use normal Pi defaults.
+ * Nested subagents are disabled via `PI_TIDY_SUBAGENT_CHILD` and the amplike
+ * subagent entry. Child bash policy is fail-closed in the permissions extension.
  */
 export function buildChildArgs(runtime: Pick<Runtime, "model" | "thinking">): string[] {
- const gatePath = resolveBashGatePath();
  return [
   "--mode", "rpc",
   "--no-session",
-  "--no-extensions",
-  "-e", gatePath,
   "--approve",
   "--model", runtime.model,
   "--thinking", runtime.thinking,
-  "--tools", CHILD_BUILTIN_TOOLS.join(","),
  ];
 }
 
-/** Spawn env for isolated children (nested subagents disabled via PI_TIDY_SUBAGENT_CHILD). */
+/** Spawn env for children (nested subagents disabled via PI_TIDY_SUBAGENT_CHILD). */
 export function buildChildEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
  return { ...env, PI_TIDY_SUBAGENT_CHILD: "1" };
 }

@@ -23,16 +23,18 @@
  *   { "permissions": { "mode": "enabled" | "yolo" } }
  *   Persisted by the /permissions command across pi invocations.
  *
- * The matching rules + built-in defaults live in lib/permissions-core.ts so the
- * child RPC bash gate (lib/subagent-bash-gate.ts) can enforce the identical
- * policy non-interactively (fail-closed, never prompts).
+ * Amplike RPC children (env + --mode rpc) and other no-UI sessions never prompt
+ * on ask. Parent TUI still uses interactive select on ask.
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { resolve } from "node:path";
 
 import {
+	decideBash,
+	DENIED_BASH_REASON,
 	GLOBAL_SETTINGS,
+	isChildRpcProcess,
 	loadAmplikeSettings,
 	loadSettings,
 	resolveBashAction,
@@ -43,6 +45,11 @@ import {
 // Permission mode: "enabled" (default) or "yolo" (all commands allowed without checks)
 // Loaded from amplike.json on startup; persisted on /permissions toggle.
 let permissionMode: "enabled" | "yolo" = loadAmplikeSettings().permissions?.mode ?? "enabled";
+
+/** True when bash must not open an interactive prompt (child RPC or no UI). */
+export function shouldFailClosedBash(hasUI: boolean, env: NodeJS.ProcessEnv = process.env, argv: readonly string[] = process.argv): boolean {
+	return isChildRpcProcess(env, argv) || !hasUI;
+}
 
 export default function (pi: ExtensionAPI) {
 	pi.registerCommand("permissions", {
@@ -83,18 +90,24 @@ export default function (pi: ExtensionAPI) {
 	pi.on("tool_call", async (event, ctx) => {
 		if (event.toolName !== "bash") return undefined;
 
-		// YOLO mode: bypass all permission checks
+		const command = String((event.input as { command?: unknown })?.command ?? "");
+		if (shouldFailClosedBash(ctx.hasUI)) {
+			const decision = decideBash(command, ctx.cwd, {
+				permissions: { mode: permissionMode },
+			});
+			if (!decision.block) return undefined;
+			return { block: true, reason: decision.reason };
+		}
+
 		if (permissionMode === "yolo") return undefined;
 
-		const command = event.input.command as string;
 		const action = resolveBashAction(command, ctx.cwd);
 
 		if (action === "allow") return undefined;
 		if (action === "deny" || action === "reject") {
-			return { block: true, reason: "Denied by amp permissions" };
+			return { block: true, reason: DENIED_BASH_REASON };
 		}
 		// action === "ask"
-		if (!ctx.hasUI) return { block: true, reason: "Command requires confirmation (no UI available)" };
 		const choice = await ctx.ui.select(
 			`⚠️  Permission required:\n\n  ${command}\n\nAllow? (Use /permissions to toggle YOLO mode and skip these checks)`,
 			["Yes", "No"],

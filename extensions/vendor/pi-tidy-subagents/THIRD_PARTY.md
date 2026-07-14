@@ -10,7 +10,7 @@ from [mikeyobrien/pi-tidy-tools](https://github.com/mikeyobrien/pi-tidy-tools).
 
 ## Local modifications
 
-- `runner.ts` `buildChildArgs`: always isolate children with `--no-extensions`, absolute `-e` Amp bash-gate path, fixed built-in `--tools`, and `--approve`.
-- `index.ts`: routing command and routing prompt guidance removed for amplike (modes replace routing). Default export retained as a library entry only — not auto-loaded by Pi (nested under `extensions/vendor/`).
+- `runner.ts` `buildChildArgs`: `--mode rpc --no-session --approve` plus model/thinking; `buildChildEnv` sets `PI_TIDY_SUBAGENT_CHILD=1`.
+- `index.ts`: library entry only (not auto-loaded under `extensions/vendor/`); re-exports `isChildRpcProcess` from amplike `permissions-core`. Parent registration is `extensions/subagent.ts`.
 
 Do **not** also install `@mobrienv/pi-tidy-subagents` alongside pi-amplike (duplicate `subagent` tool).

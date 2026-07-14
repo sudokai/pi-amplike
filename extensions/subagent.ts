@@ -3,7 +3,7 @@
  *
  * Registers `subagent` + `subagent_control` via vendored pi-tidy-subagents.
  * Amplike-only policy: optional per-child `mode`, Amp fail-closed bash in
- * children (via spawn gate), no tidy routing, no `/btw`.
+ * children (permissions extension), no tidy routing, no `/btw`.
  */
 
 import { getAgentDir, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -39,7 +39,7 @@ import {
 } from "./vendor/pi-tidy-subagents/ui.js";
 
 export { buildEnvelope } from "./vendor/pi-tidy-subagents/envelope.js";
-export { buildChildArgs, launchRuntime, resolveBashGatePath, CHILD_BUILTIN_TOOLS } from "./vendor/pi-tidy-subagents/runner.js";
+export { buildChildArgs, launchRuntime } from "./vendor/pi-tidy-subagents/runner.js";
 export { expandAgentModes } from "./lib/subagent-mode.js";
 
 /** Exact model field guidance (amplike: modes replace tidy routing). */
@@ -172,17 +172,17 @@ const PROMPT_GUIDELINES = [
 	"Thinking is the primary per-child control. Prefer omit thinking to inherit parent; otherwise pick a closed Pi level for the task shape.",
 	"Prefer omit model (inherit parent). Pass an exact registered provider/model-id only when capability or cost warrants. No aliases, profiles, or fuzzy patterns.",
 	"Optional per-child mode from amplike modes.json: parent session → mode → explicit model → explicit thinking. Unknown mode fails the whole batch.",
-	"Children run isolated RPC processes with built-in tools only (read, write, edit, bash, grep, find, ls). Bash is fail-closed Amp policy (never prompts); YOLO on parent allows all child bash.",
+	"Children run RPC processes with full extension discovery (and extension-registered tools). Nested subagent is disabled. Bash is fail-closed Amp policy (never prompts); YOLO on parent allows all child bash.",
 	"Use subagent execution=background only when the parent can proceed without the result; omission stays foreground and synchronous.",
 	"Use subagent_control to inspect, background, steer, cancel, change delivery, or collect one session child by canonical target or unambiguous label.",
 	"Subagent results use tidy envelopes and agent-dir artifacts (child-*.md, run.json, events); they are not Pi session .jsonl files for session_query.",
 ];
 
 export default function (pi: ExtensionAPI): void {
-	// Nested fan-out disabled only in true child RPC processes (env + --mode rpc).
+	// Nested fan-out is disabled in child RPC processes (PI_TIDY_SUBAGENT_CHILD + --mode rpc).
+	// Leave the env set for the process lifetime; other extensions also key off it.
 	if (isChildRpcProcess()) {
 		console.warn(CHILD_SKIP_DIAGNOSTIC);
-		delete process.env.PI_TIDY_SUBAGENT_CHILD;
 		return;
 	}
 
@@ -286,10 +286,9 @@ export default function (pi: ExtensionAPI): void {
 
 			const runId = `${new Date().toISOString().replace(/[:.]/g, "-")}-${randomUUID().slice(0, 8)}`;
 			const runDir = await createRunStore(getAgentDir(), runId);
-			// tools/approved recorded for details; spawn path always isolates via buildChildArgs.
 			const shared = {
 				cwd: ctx.cwd,
-				tools: ["read", "write", "edit", "bash", "grep", "find", "ls"],
+				tools: [] as string[],
 				runDir,
 				approved: true,
 			};

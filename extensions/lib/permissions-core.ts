@@ -1,10 +1,9 @@
 /**
  * Amp permissions — pure decision logic.
  *
- * Shared by the interactive `permissions` extension (which adds UI for "ask")
- * and the child RPC bash gate (`subagent-bash-gate.ts`, fail-closed, never
- * prompts). Keeping the rules here is the single source of truth so the two
- * paths can never diverge.
+ * Shared by the interactive `permissions` extension (which adds UI for "ask"
+ * in the parent TUI) and fail-closed paths (child RPC / no UI). Keeping the
+ * rules here is the single source of truth so those paths cannot diverge.
  */
 
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
@@ -362,4 +361,49 @@ export function resolveBashAction(command: string, cwd: string): PermissionActio
 
 	// Built-in rules as final fallback (always ends with a catch-all "ask")
 	return applyRules(BUILTIN_PERMISSIONS) ?? "allow";
+}
+
+/** User-facing reason when ask is blocked without an interactive prompt. */
+export const FAIL_CLOSED_BASH_REASON =
+	"Blocked by Amp fail-closed bash policy (ask never prompts without UI). Use an allowed command, adjust amp.permissions/allowlist, or enable YOLO via /permissions.";
+
+/** User-facing reason when Amp rules deny or reject a bash command. */
+export const DENIED_BASH_REASON = "Denied by amp permissions";
+
+/** True when `PI_TIDY_SUBAGENT_CHILD=1` is set. */
+export function isChildRpcEnv(env: NodeJS.ProcessEnv = process.env): boolean {
+	return env.PI_TIDY_SUBAGENT_CHILD === "1";
+}
+
+/**
+ * True for amplike-spawned Pi RPC children: `PI_TIDY_SUBAGENT_CHILD=1` and `--mode rpc`.
+ * Both are required so a parent interactive session is not treated as a child.
+ */
+export function isChildRpcProcess(
+	env: NodeJS.ProcessEnv = process.env,
+	argv: readonly string[] = process.argv,
+): boolean {
+	if (!isChildRpcEnv(env)) return false;
+	for (let i = 0; i < argv.length - 1; i++) {
+		if (argv[i] === "--mode" && argv[i + 1] === "rpc") return true;
+	}
+	return false;
+}
+
+/**
+ * Pure bash decision (no ExtensionAPI).
+ * YOLO allows all; allow runs; deny/reject use DENIED_BASH_REASON; ask uses FAIL_CLOSED_BASH_REASON.
+ */
+export function decideBash(
+	command: string,
+	cwd: string,
+	amplikeSettings: AmplikeSettings,
+): { block: false } | { block: true; reason: string } {
+	if (amplikeSettings.permissions?.mode === "yolo") return { block: false };
+	const action = resolveBashAction(command, cwd);
+	if (action === "allow") return { block: false };
+	if (action === "deny" || action === "reject") {
+		return { block: true, reason: DENIED_BASH_REASON };
+	}
+	return { block: true, reason: FAIL_CLOSED_BASH_REASON };
 }

@@ -12,7 +12,7 @@ export { concurrencyCap, Scheduler } from "./scheduler.js";
 export { renderLines, renderBackgroundAcknowledgementLines, ToolSnapshotComponent } from "./render.js";
 export { BackgroundStampComponent, BackgroundWidgetComponent, ManagementOverlay, managementActions, managementItems, renderBackgroundWidgetLines, renderManagementLines } from "./ui.js";
 export { SessionCoordinator, backgroundAcknowledgement, buildMixedEnvelope, publicChild } from "./coordinator.js";
-export { buildChildArgs, buildChildEnv, launchRuntime, resolveBashGatePath, CHILD_BUILTIN_TOOLS } from "./runner.js";
+export { buildChildArgs, buildChildEnv, launchRuntime } from "./runner.js";
 export { inheritRuntimePlan, isThinkingLevel, THINKING_LEVELS } from "./types.js";
 export { parseExactModelRef, resolveBatchRuntime, wrapPiRegistry, RuntimeResolutionError } from "./runtime.js";
 export {
@@ -44,20 +44,8 @@ export const THINKING_FIELD_DESCRIPTION =
 export const CHILD_SKIP_DIAGNOSTIC =
 	"pi-tidy-subagents: skipping registration in child RPC process (nested subagents disabled)";
 
-/**
- * True only for processes this package spawned as Pi RPC children.
- * Ambient `PI_TIDY_SUBAGENT_CHILD=1` alone must not disable parent sessions.
- */
-export function isChildRpcProcess(
-	env: NodeJS.ProcessEnv = process.env,
-	argv: readonly string[] = process.argv,
-): boolean {
-	if (env.PI_TIDY_SUBAGENT_CHILD !== "1") return false;
-	for (let i = 0; i < argv.length - 1; i++) {
-		if (argv[i] === "--mode" && argv[i + 1] === "rpc") return true;
-	}
-	return false;
-}
+/** Child-RPC predicate (`PI_TIDY_SUBAGENT_CHILD=1` and `--mode rpc`). */
+export { isChildRpcProcess } from "../../lib/permissions-core.js";
 
 /**
  * Library-only entry. Do not register this path as a Pi extension.
