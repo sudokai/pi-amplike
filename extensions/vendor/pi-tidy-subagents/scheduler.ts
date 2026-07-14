@@ -1,8 +1,10 @@
-import { availableParallelism, freemem } from "node:os";
-// Follow-up: measure process memory, CPU/tool contention, and provider behavior
-// before replacing this deliberately naive heuristic or exposing public controls.
-export function concurrencyCap(cpus = availableParallelism(), freeBytes = freemem()): number {
- return Math.max(1, Math.min(Math.max(1, Math.floor(cpus / 2)), Math.max(1, Math.floor(freeBytes / (2 * 1024 ** 3)))));
+import { availableParallelism } from "node:os";
+// CPU-only default: half of logical CPUs (min 1). freemem() was dropped — on
+// Darwin it reports reclaimable cache as non-free and collapses the cap to 1.
+// Follow-up: provider rate limits / shared working-tree contention if we need
+// a tighter heuristic or public controls later.
+export function concurrencyCap(cpus = availableParallelism()): number {
+ return Math.max(1, Math.floor(cpus / 2));
 }
 interface Job<T> { owner: string; run: () => Promise<T>; resolve: (v: T) => void; reject: (e: unknown) => void }
 export class Scheduler {
