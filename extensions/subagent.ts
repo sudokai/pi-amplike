@@ -31,6 +31,7 @@ import {
 } from "./vendor/pi-tidy-subagents/runtime.js";
 import { concurrencyCap, Scheduler } from "./vendor/pi-tidy-subagents/scheduler.js";
 import { createRunStore } from "./vendor/pi-tidy-subagents/store.js";
+import { transcriptPathFor } from "./vendor/pi-tidy-subagents/transcript.js";
 import type { ChildState, DeliveryPolicy, RunDetails } from "./vendor/pi-tidy-subagents/types.js";
 import {
 	BackgroundStampComponent,
@@ -175,7 +176,7 @@ const PROMPT_GUIDELINES = [
 	"Children run RPC processes with full extension discovery (and extension-registered tools). Nested subagent is disabled. Bash is fail-closed Amp policy (never prompts); YOLO on parent allows all child bash.",
 	"Use subagent execution=background only when the parent can proceed without the result; omission stays foreground and synchronous.",
 	"Use subagent_control to inspect, background, steer, cancel, change delivery, or collect one session child by canonical target or unambiguous label.",
-	"Subagent results use tidy envelopes and agent-dir artifacts (child-*.md, run.json, events); they are not Pi session .jsonl files for session_query.",
+	"Subagent results use tidy envelopes and agent-dir artifacts (child-*.md final result, child-*.transcript.md live steer pack, run.json, events jsonl); they are not Pi session .jsonl files for session_query. Use inspect for artifact + transcript paths.",
 ];
 
 export default function (pi: ExtensionAPI): void {
@@ -328,6 +329,7 @@ export default function (pi: ExtensionAPI): void {
 					eventCount: 0,
 					response: "",
 					artifactPath: join(runDir, `${id}.md`),
+					transcriptPath: transcriptPathFor(runDir, id),
 				};
 			});
 			const details: RunDetails = {

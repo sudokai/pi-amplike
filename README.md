@@ -21,7 +21,7 @@
 - **`/subagents`** (and `Ctrl+Shift+B`) - TUI management overlay for active/completed children
 - Per-child **amplike modes** (`modes.json`) expand to model/thinking with precedence: parent session → `mode` → explicit `model` → explicit `thinking`
 - Children are RPC processes with full extension discovery; nested subagents disabled; Amp bash fail-closed (never prompts)
-- Results use tidy envelopes and agent-dir artifacts (`child-*.md`, `run.json`, event jsonl) — not Pi session `.jsonl` paths for `session_query`
+- Results use tidy envelopes and agent-dir artifacts (`child-*.md` final result, `child-*.transcript.md` live steer pack, `run.json`, event jsonl) — not Pi session `.jsonl` paths for `session_query`
 
 ### Permissions
 - **`/permissions`** command toggles bash command allow/deny permissions, directly read from AmpCode's configuration files.
@@ -162,7 +162,16 @@ with env `PI_TIDY_SUBAGENT_CHILD=1`.
   - Amp `ask` / `deny` / `reject` → block with a clear error
 - Parent interactive `/permissions` still prompts on `ask` in the main session
 
-Artifacts for a run live under the Pi agent dir (tidy store): `run.json`, `child-*.md`, event jsonl. Use those (and tool envelopes) instead of `session_query` for subagent transcripts.
+Artifacts for a run live under the Pi agent dir (tidy store):
+
+| File | Role |
+|------|------|
+| `run.json` | Run manifest (children metadata, status, paths) |
+| `child-*.md` | Final result body only (envelope content) |
+| `child-*.transcript.md` | Live human-readable steer pack (prompt, thinking, tools, partial stream, steers) |
+| `child-*.jsonl` | Full raw RPC event log |
+
+`subagent_control` `inspect` returns status plus `artifactPath` and `transcriptPath` (no transcript body inlined). Use these files (and tool envelopes) instead of `session_query` for subagent work.
 
 ### Permissions
 

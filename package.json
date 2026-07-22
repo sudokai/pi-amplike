@@ -43,7 +43,7 @@
     "node": ">=22.19.0"
   },
   "scripts": {
-    "test": "node test/mode-utils.test.mjs && node test/subagent-mode.test.mjs && node test/child-args.test.mjs && node test/permissions-bash.test.mjs && node test/concurrency-cap.test.mjs && node test/runner-terminal-status.test.mjs && node test/envelope-content.test.mjs && node test/render-stability.test.mjs"
+    "test": "node test/mode-utils.test.mjs && node test/subagent-mode.test.mjs && node test/child-args.test.mjs && node test/permissions-bash.test.mjs && node test/concurrency-cap.test.mjs && node test/runner-terminal-status.test.mjs && node test/envelope-content.test.mjs && node test/render-stability.test.mjs && node test/transcript.test.mjs"
   },
   "devDependencies": {
     "@mariozechner/jiti": "^2.6.5",

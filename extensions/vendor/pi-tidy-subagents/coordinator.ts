@@ -5,6 +5,7 @@ import { buildEnvelope, envelopeChildContent } from "./envelope.js";
 import { runChild, type ChildControlHandle, type SharedLaunchContext } from "./runner.js";
 import { Scheduler } from "./scheduler.js";
 import { saveLegacyState, saveRun } from "./store.js";
+import { initialTranscriptModel, transcriptPathFor, writeTerminalTranscript, writeTranscriptFile } from "./transcript.js";
 import type { ChildState, DeliveryPolicy, RunDetails } from "./types.js";
 import { backgroundWidgetStateKey, BackgroundWidgetComponent, type BackgroundStampData } from "./ui.js";
 
@@ -131,6 +132,12 @@ export class SessionCoordinator {
   const directBackground = records.filter((record) => record.child.ownership === "background");
   this.notifyRegistration(batchKey);
   await this.persist(details);
+  // Early steer-pack files so inspect can open a path while children are still queued.
+  await Promise.all(details.children.map(async (child) => {
+   const path = child.transcriptPath ?? transcriptPathFor(details.runDir, child.id);
+   child.transcriptPath = path;
+   try { await writeTranscriptFile(path, initialTranscriptModel(child)); } catch { /* best-effort */ }
+  }));
   for (const record of directBackground) this.appendStamp(record, "handoff");
   this.refreshWidget();
   for (const record of records) {
@@ -236,6 +243,13 @@ export class SessionCoordinator {
    if (child.ownership === "background" && child.deliveryPolicy === "manual") child.deliveryState = "manual";
    // Durable process truth precedes both transcript history and model-context completion delivery.
    await this.persist(record.details);
+   // Paths that never entered runChild (queued cancel, missing plan, scheduler reject) never
+   // attach a TranscriptWriter. record.handle is only set after successful startup observation,
+   // so !handle means the runner never owned the live file — rewrite terminal header once.
+   if (!record.handle) {
+    child.transcriptPath ??= transcriptPathFor(record.details.runDir, child.id);
+    await writeTerminalTranscript(child, record.details.runDir);
+   }
    if (child.ownership === "background") {
     this.appendStamp(record, "terminal");
     if (!this.shuttingDown && child.deliveryPolicy !== "manual") await this.queueCompletion(record, "automatic");
@@ -316,7 +330,18 @@ export class SessionCoordinator {
 
  private inspect(record: ChildRecord): ControlResponse {
   const activity = record.child.streamingLine?.trim() || record.child.activities?.at(-1) || record.child.error || "no activity yet";
-  return this.response(`${record.child.label} (${record.child.target}) is ${record.child.status}/${record.child.ownership ?? "foreground"}; activity: ${activity}; delivery ${record.child.deliveryPolicy ?? "none"}; artifact ${record.child.artifactPath}`, { child: publicChild(record.child), controlReady: Boolean(record.handle) && !terminal(record.child) });
+  const transcriptPath = record.child.transcriptPath
+   ?? transcriptPathFor(record.details.runDir, record.child.id);
+  record.child.transcriptPath = transcriptPath;
+  return this.response(
+   `${record.child.label} (${record.child.target}) is ${record.child.status}/${record.child.ownership ?? "foreground"}; activity: ${activity}; delivery ${record.child.deliveryPolicy ?? "none"}; artifact ${record.child.artifactPath}; transcript ${transcriptPath}`,
+   {
+    child: publicChild(record.child),
+    artifactPath: record.child.artifactPath,
+    transcriptPath,
+    controlReady: Boolean(record.handle) && !terminal(record.child),
+   },
+  );
  }
 
  private status(): ControlResponse {
@@ -481,6 +506,7 @@ export class SessionCoordinator {
     activeTools: raw.activeTools ?? [],
     activities: raw.activities ?? [],
     artifactPath: join(runDir, `${childId}.md`),
+    transcriptPath: transcriptPathFor(runDir, childId),
    };
    const details: RunDetails = { ...manifest, schemaVersion: 3, runDir, cap: manifest.concurrencyCap ?? 1, children: [child] };
    const record: ChildRecord = { child, details, shared: { cwd: manifest.cwd ?? "", tools: [], runDir, approved: true }, mode: "json", controller: new AbortController(), foregroundDone: Promise.resolve(), releaseForeground: () => {}, mutation: Promise.resolve(), settledCommitted: true, completionQueued: child.deliveryState === "accepted", shutdownCancellation: false, widgetSnapshot: publicChild(child), onChanged: () => {} };

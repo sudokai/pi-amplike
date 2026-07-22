@@ -1,6 +1,12 @@
 import { spawn } from "node:child_process";
 import { buildToolActivityBlock } from "./vendor/pi-tidy-core/index.js";
 import { appendEvent } from "./store.js";
+import {
+	TranscriptAccumulator,
+	TranscriptWriter,
+	headerFromChild,
+	transcriptPathFor,
+} from "./transcript.js";
 import type { ChildRuntimePlan, ChildState, NormalizedEvent } from "./types.js";
 
 /** Shared launch context for sibling children (cwd, runDir, optional tools/approved metadata). */
@@ -141,7 +147,19 @@ export async function runChild(
  changed: Changed,
  onControl?: (handle: ChildControlHandle) => void,
 ): Promise<ChildState> {
- child.status = "starting"; child.startedAt = Date.now(); changed(true);
+ child.status = "starting"; child.startedAt = Date.now();
+ const transcriptPath = child.transcriptPath ?? transcriptPathFor(runtime.runDir, child.id);
+ child.transcriptPath = transcriptPath;
+ const transcript = new TranscriptAccumulator({
+  header: headerFromChild(child),
+  prompt: child.prompt,
+ });
+ const transcriptWriter = new TranscriptWriter(transcriptPath, () => {
+  transcript.updateHeader(headerFromChild(child));
+  return transcript.model();
+ });
+ void transcriptWriter.flushNow();
+ changed(true);
  const executable = process.env.PI_TIDY_SUBAGENT_EXECUTABLE || (process.argv[1] ? process.execPath : "pi");
  // Base prefix is either the test fake-rpc path or the parent entry script; always append resolved launch args.
  const prefix = process.env.PI_TIDY_SUBAGENT_ARGS
@@ -184,19 +202,23 @@ export async function runChild(
   proc.once("error", reject);
  });
  try { await started; } catch (error) {
-  child.status = "failed"; child.endedAt = Date.now(); child.error = `Could not start Pi RPC: ${error instanceof Error ? error.message : String(error)}`; changed(true);
+  child.status = "failed"; child.endedAt = Date.now(); child.error = `Could not start Pi RPC: ${error instanceof Error ? error.message : String(error)}`;
+  await transcriptWriter.dispose();
+  changed(true);
   throw new Error(child.error);
  }
- if (!signal?.aborted) { child.status = "running"; changed(true); }
+ if (!signal?.aborted) { child.status = "running"; void transcriptWriter.flushNow(); changed(true); }
 
  const processEvent = async (raw: any): Promise<void> => {
   const event: NormalizedEvent = { schemaVersion: 1, sequence: ++child.eventCount, timestamp: new Date().toISOString(), type: String(raw.type ?? "unknown"), payload: raw };
   await appendEvent(runtime.runDir, child.id, event);
+  const transcriptFlush = transcript.applyEvent(raw);
   if (raw.type === "response" && raw.id != null && pendingResponses.has(String(raw.id))) {
    const pending = pendingResponses.get(String(raw.id))!;
    pendingResponses.delete(String(raw.id));
    if (raw.success === false) pending.reject(new Error(String(raw.error ?? `RPC ${raw.command ?? "command"} failed`)));
    else pending.resolve(raw.data);
+   transcriptWriter.schedule(transcriptFlush);
    return;
   }
   if (raw.type === "response" && raw.command === "prompt" && raw.success === false) {
@@ -224,6 +246,9 @@ export async function runChild(
    const lines = combined.split("\n"); child.streamingLine = lines.pop() ?? "";
    for (const line of lines) if (line.trim()) appendActivities(line);
    changed(false);
+  } else if (raw.type === "message_update" && raw.assistantMessageEvent?.type === "thinking_delta") {
+   // Transcript captures thinking; activity stream stays text-only.
+   changed(false);
   } else if (raw.type === "message_end" && raw.message?.role === "assistant") {
    const text = messageText(raw.message); child.response = text;
    if (typeof raw.message.stopReason === "string") lastStopReason = raw.message.stopReason;
@@ -243,6 +268,7 @@ export async function runChild(
    settled = true; changed(true);
    proc.stdin.end(); proc.kill("SIGTERM"); setTimeout(() => proc.kill("SIGKILL"), 750).unref();
   }
+  transcriptWriter.schedule(transcriptFlush);
  };
  proc.stdout.on("data", (chunk: Buffer) => {
   buffer += chunk.toString("utf8");
@@ -284,7 +310,9 @@ export async function runChild(
   if (settled || ["completed", "warning", "failed", "not-started"].includes(child.status)) {
    return Promise.reject(new Error(`Child is already terminal (${child.status})`));
   }
-  cancelled = true; child.status = "cancelled"; changed(true);
+  cancelled = true; child.status = "cancelled"; child.error = "Cancelled";
+  transcriptWriter.schedule("immediate");
+  changed(true);
   abortPromise = rpcCommand("abort").then(() => ({ accepted: true as const }));
   setTimeout(() => proc.kill("SIGTERM"), 500).unref();
   setTimeout(() => proc.kill("SIGKILL"), 1250).unref();
@@ -339,10 +367,13 @@ export async function runChild(
     async steer(message) {
      if (!message.trim()) throw new Error("Steering message must not be empty");
      await rpcCommand("steer", { message });
+     transcriptWriter.schedule(transcript.recordSteer(message.trim()));
      return { accepted: true, ...(child.pendingSteering !== undefined ? { pendingSteering: child.pendingSteering } : {}) };
     },
     abort: requestAbort,
    });
+   // Header may now show observed model/thinking; flush before the prompt so inspect matches truth.
+   await transcriptWriter.flushNow();
    changed(true);
   } catch (error) {
    if (!cancelled) {
@@ -354,6 +385,7 @@ export async function runChild(
     setTimeout(() => proc.kill("SIGKILL"), 750).unref();
     await closePromise; await writes;
     signal?.removeEventListener("abort", abort);
+    await transcriptWriter.dispose();
     changed(true);
     return child;
    }
@@ -370,6 +402,7 @@ export async function runChild(
  child.endedAt = Date.now();
  if (parseFailure) {
   terminalizeActiveTools();
+  await transcriptWriter.dispose();
   throw new Error(`Could not maintain durable child event stream: ${parseFailure instanceof Error ? parseFailure.message : String(parseFailure)}`);
  }
  // Startup observation failures return early after setting status/error.
@@ -384,5 +417,6 @@ export async function runChild(
   errorMessage: lastErrorMessage,
  });
  terminalizeActiveTools();
+ await transcriptWriter.dispose();
  changed(true); return child;
 }

@@ -118,6 +118,8 @@ export interface ChildState {
  input: number; output: number; cacheRead: number; cacheWrite: number; providerTraffic: number; tokens: number;
  activities: string[]; streamingLine?: string; activeTools: ActiveTool[]; eventCount: number;
  response: string; error?: string; artifactPath: string;
+ /** Live steer-pack markdown sibling of artifactPath (`child-NNN.transcript.md`). */
+ transcriptPath?: string;
  /** Child-owned resolved runtime with model/thinking provenance (schema v2+). */
  runtimePlan?: ChildRuntimePlan;
 }
