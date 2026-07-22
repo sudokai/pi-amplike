@@ -348,16 +348,24 @@ export class SessionCoordinator {
   const values = [...this.records.values()].map((record) => publicChild(record.child));
   const activeForeground = values.filter((child) => !terminal(child) && (child.ownership ?? "foreground") === "foreground");
   const activeBackground = values.filter((child) => !terminal(child) && child.ownership === "background");
-  const terminalUncollected = values.filter((child) => terminal(child) && child.ownership === "background" && !(child.collectionCount ?? 0));
+  const byEndedNewest = (a: ChildState, b: ChildState) =>
+   (b.endedAt ?? b.startedAt ?? 0) - (a.endedAt ?? a.startedAt ?? 0);
+  const terminalChildren = values.filter((child) => terminal(child)).sort(byEndedNewest);
+  const terminalUncollected = terminalChildren.filter((child) => child.ownership === "background" && !(child.collectionCount ?? 0));
   const lines = [
    `Active foreground: ${activeForeground.length}`,
    ...activeForeground.map((child) => `- ${child.label} ${child.target} ${child.status}`),
    `Active background: ${activeBackground.length}`,
    ...activeBackground.map((child) => `- ${child.label} ${child.target} ${child.status} delivery=${child.deliveryPolicy}`),
-   `Terminal uncollected: ${terminalUncollected.length}`,
-   ...terminalUncollected.map((child) => `- ${child.label} ${child.target} ${child.status} age=${this.age(child)} artifact=${child.artifactPath}`),
+   `Terminal: ${terminalChildren.length}`,
+   ...terminalChildren.map((child) => {
+    const ownership = child.ownership ?? "foreground";
+    const delivery = ownership === "background" ? ` delivery=${child.deliveryPolicy ?? "auto"}` : "";
+    const collected = (child.collectionCount ?? 0) > 0 ? " · collected" : "";
+    return `- ${child.label} ${child.target} ${child.status} ownership=${ownership}${delivery} age=${this.age(child)} artifact=${child.artifactPath}${collected}`;
+   }),
   ];
-  return this.response(lines.join("\n"), { activeForeground, activeBackground, terminalUncollected });
+  return this.response(lines.join("\n"), { activeForeground, activeBackground, terminal: terminalChildren, terminalUncollected });
  }
 
  private async setDelivery(record: ChildRecord, delivery?: DeliveryPolicy): Promise<ControlResponse> {

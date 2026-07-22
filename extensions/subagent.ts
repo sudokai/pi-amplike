@@ -176,7 +176,8 @@ const PROMPT_GUIDELINES = [
 	"Children run RPC processes with full extension discovery (and extension-registered tools). Nested subagent is disabled. Bash is fail-closed Amp policy (never prompts); YOLO on parent allows all child bash.",
 	"Use subagent execution=background only when the parent can proceed without the result; omission stays foreground and synchronous.",
 	"Use subagent_control to inspect, background, steer, cancel, change delivery, or collect one session child by canonical target or unambiguous label.",
-	"Subagent results use tidy envelopes and agent-dir artifacts (child-*.md final result, child-*.transcript.md live steer pack, run.json, events jsonl); they are not Pi session .jsonl files for session_query. Use inspect for artifact + transcript paths.",
+	"subagent_control status and /subagents list all children for this parent session, including finished foreground/background (collected or not); finished stay inspectable for the process lifetime.",
+	"Subagent results use tidy envelopes and agent-dir artifacts (child-*.md final result, child-*.transcript.md live steer pack, run.json, events jsonl); they are not Pi session .jsonl files for session_query. Use inspect for artifact + transcript paths (no body inlined).",
 ];
 
 export default function (pi: ExtensionAPI): void {
@@ -410,9 +411,10 @@ export default function (pi: ExtensionAPI): void {
 		label: "subagent control",
 		executionMode: "parallel",
 		description:
-			"Control one session-scoped child: background, steer through Pi's native queue, cancel, inspect, list status, set automatic/manual delivery, or collect a bounded terminal result.",
+			"Control one session-scoped child: background, steer through Pi's native queue, cancel, inspect, list status (all session children including finished), set automatic/manual delivery, or collect a bounded terminal result.",
 		promptGuidelines: [
 			"Use subagent_control canonical targets when labels may be ambiguous. Background ownership is one-way and print mode cannot own background work.",
+			"status lists active and terminal children for this session only; finished children remain inspectable until process exit.",
 		],
 		parameters: ControlParameters,
 		execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {

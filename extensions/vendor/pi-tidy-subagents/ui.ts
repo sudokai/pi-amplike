@@ -72,16 +72,16 @@ export class BackgroundStampComponent implements Component {
  }
 }
 
-export type ManagementGroup = "Active foreground" | "Active background" | "Terminal uncollected";
+export type ManagementGroup = "Active foreground" | "Active background" | "Terminal";
 export type ManagementAction = "background" | "inspect" | "steer" | "cancel" | "set_delivery" | "collect";
 export interface ManagementItem { group: ManagementGroup; child: ChildState }
 export interface ManagementChoice { target: string; action: ManagementAction }
 
-export function managementItems(status: { activeForeground: ChildState[]; activeBackground: ChildState[]; terminalUncollected: ChildState[] }): ManagementItem[] {
+export function managementItems(status: { activeForeground: ChildState[]; activeBackground: ChildState[]; terminal: ChildState[] }): ManagementItem[] {
  return [
   ...status.activeForeground.map((child) => ({ group: "Active foreground" as const, child })),
   ...status.activeBackground.map((child) => ({ group: "Active background" as const, child })),
-  ...status.terminalUncollected.map((child) => ({ group: "Terminal uncollected" as const, child })),
+  ...status.terminal.map((child) => ({ group: "Terminal" as const, child })),
  ];
 }
 
@@ -90,7 +90,12 @@ export function managementActions(item: ManagementItem): ManagementAction[] {
  if (item.group === "Active background") return item.child.status === "running"
   ? ["inspect", "steer", "cancel", "set_delivery"]
   : ["inspect", "cancel", "set_delivery"];
- return item.child.followUpAcceptedAt === undefined ? ["inspect", "set_delivery", "collect"] : ["inspect", "collect"];
+ if (item.group === "Terminal") {
+  // FG inspect-only; BG keeps delivery/collect eligibility.
+  if ((item.child.ownership ?? "foreground") === "foreground") return ["inspect"];
+  return item.child.followUpAcceptedAt === undefined ? ["inspect", "set_delivery", "collect"] : ["inspect", "collect"];
+ }
+ return ["inspect"];
 }
 
 export class ManagementOverlay implements Component {
@@ -124,14 +129,15 @@ export class ManagementOverlay implements Component {
    return `${border("│")}${fitted}${" ".repeat(Math.max(0, inner - visibleWidth(fitted)))}${border("│")}`;
   };
   const lines = [border(`╭${"─".repeat(inner)}╮`), row(` ${this.theme.fg("accent", this.theme.bold("Session subagents"))}`)];
-  if (this.items.length === 0) lines.push(row(` ${this.theme.fg("dim", "No active children or uncollected results")}`));
+  if (this.items.length === 0) lines.push(row(` ${this.theme.fg("dim", "No session subagents")}`));
   let previous: ManagementGroup | undefined;
   this.items.forEach((item, index) => {
    if (item.group !== previous) { lines.push(row(` ${this.theme.fg("muted", item.group)}`)); previous = item.group; }
    const selected = index === this.selected;
    const child = item.child;
    const delivery = child.ownership === "background" ? ` · ${child.deliveryPolicy ?? "auto"}` : "";
-   const terminalMeta = item.group === "Terminal uncollected" ? ` · ${formatAge(child, this.renderedAt)} · ${child.artifactPath}` : "";
+   const collected = item.group === "Terminal" && (child.collectionCount ?? 0) > 0 ? " · collected" : "";
+   const terminalMeta = item.group === "Terminal" ? ` · ${formatAge(child, this.renderedAt)} · ${child.artifactPath}${collected}` : "";
    const text = ` ${selected ? "›" : " "} ${child.label} · ${child.status}${delivery} · ${child.target}${terminalMeta}`;
    lines.push(row(selected ? this.theme.fg("accent", text) : text));
    if (selected) lines.push(row(`   ${this.theme.fg("dim", managementActions(item).join(" · "))}`));

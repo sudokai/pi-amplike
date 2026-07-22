@@ -15,5 +15,6 @@ from [mikeyobrien/pi-tidy-tools](https://github.com/mikeyobrien/pi-tidy-tools).
 - `scheduler.ts` `concurrencyCap`: CPU-only `max(1, floor(availableParallelism() / 2))`. Dropped `os.freemem()` — on macOS free memory is often near-zero while most RAM is reclaimable cache, which forced `cap = 1` on large multi-core hosts.
 - `runner.ts` `finalizeChildTerminalStatus`: on child exit, set status from settlement, process errors, and assistant `stopReason` / `errorMessage` (`error` and `aborted` → `failed`; `length` → `warning`).
 - `envelope.ts` `envelopeChildContent`: for `failed` / `cancelled` / `warning`, put harness `error` before partial `response`; used for parent tool CDATA, on-disk artifacts (`store.saveRun`), and TUI terminal stamps.
+- `coordinator.ts` `status` / `ui.ts` management: list **all** terminal children for the parent session (foreground + background, collected or not) under one `Terminal` group; keep `terminalUncollected` as a filtered subset. FG terminal overlay actions are inspect-only; BG terminal keeps delivery/collect eligibility.
 
 Do **not** also install `@mobrienv/pi-tidy-subagents` alongside pi-amplike (duplicate `subagent` tool).

@@ -18,7 +18,7 @@
 ### Subagents (tidy-style RPC children)
 - **`subagent` tool** - Launch ordered foreground and/or background child Pi agents (`agents[]` with `label?`, `reason`, `prompt`, optional `mode` / `model` / `thinking` / `execution`)
 - **`subagent_control` tool** - Inspect, steer, cancel, set delivery, or collect session-scoped background children
-- **`/subagents`** (and `Ctrl+Shift+B`) - TUI management overlay for active/completed children
+- **`/subagents`** (and `Ctrl+Shift+B`) - TUI management overlay for all session children (active + finished); finished remain listed for the process lifetime
 - Per-child **amplike modes** (`modes.json`) expand to model/thinking with precedence: parent session → `mode` → explicit `model` → explicit `thinking`
 - Children are RPC processes with full extension discovery; nested subagents disabled; Amp bash fail-closed (never prompts)
 - Results use tidy envelopes and agent-dir artifacts (`child-*.md` final result, `child-*.transcript.md` live steer pack, `run.json`, event jsonl) — not Pi session `.jsonl` paths for `session_query`
@@ -139,7 +139,7 @@ The `subagent` tool takes an ordered `agents[]` list (no `tasks[]` shim):
 
 **Mode / model / thinking precedence** (same as handoff): parent session → `mode` → explicit `model` → explicit `thinking`. Unknown `mode` fails the whole batch (no partial children). Invalid or unauthenticated explicit models also fail preflight.
 
-**Foreground** children block the tool call until they settle; **background** children register and return durable acknowledgements. Use `subagent_control` (`status` / `steer` / `cancel` / `inspect` / `set_delivery` / `collect` / `background`) or `/subagents` to manage them.
+**Foreground** children block the tool call until they settle; **background** children register and return durable acknowledgements. Use `subagent_control` (`status` / `steer` / `cancel` / `inspect` / `set_delivery` / `collect` / `background`) or `/subagents` to manage them. `status` and `/subagents` list **all** children for this parent session, including finished foreground/background (collected or not); `terminalUncollected` remains a filtered subset for compatibility. `inspect` stays path-oriented (status, ownership, artifact/transcript paths; no inlined body).
 
 #### Child process and bash policy
 
@@ -171,7 +171,7 @@ Artifacts for a run live under the Pi agent dir (tidy store):
 | `child-*.transcript.md` | Live human-readable steer pack (prompt, thinking, tools, partial stream, steers) |
 | `child-*.jsonl` | Full raw RPC event log |
 
-`subagent_control` `inspect` returns status plus `artifactPath` and `transcriptPath` (no transcript body inlined). Use these files (and tool envelopes) instead of `session_query` for subagent work.
+`subagent_control` `inspect` resolves finished children still held in the current session (or via exact-target legacy disk load) and returns status plus `artifactPath` and `transcriptPath` (no transcript body inlined). Use these files (and tool envelopes) instead of `session_query` for subagent work.
 
 ### Permissions
 

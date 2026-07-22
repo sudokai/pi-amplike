@@ -104,7 +104,7 @@ try {
 	eq("historical handoff stamp remains stable across later TUI renders", handoffStamp.render(120), handoffInitial);
 
 	const management = new ManagementOverlay(
-		[{ group: "Terminal uncollected", child: completedChild }],
+		[{ group: "Terminal", child: completedChild }],
 		theme,
 		() => {},
 	);
