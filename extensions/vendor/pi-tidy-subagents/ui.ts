@@ -30,7 +30,11 @@ export function backgroundWidgetStateKey(children: ChildState[], expanded: boole
   .map(stripPrompt)
   .map((child) => ({ ...child, startedAt: undefined, endedAt: undefined }));
  const lines = [expanded ? "expanded" : "collapsed", ...renderLines(details(stableChildren), expanded, 0, width)];
- return JSON.stringify(width === undefined ? lines : limitRenderedLines(lines, MAX_BACKGROUND_WIDGET_LINES, "hidden"));
+ // Collapsed keeps a hard budget (scroll stability). Expanded must include every child.
+ const bounded = !expanded && width !== undefined
+  ? limitRenderedLines(lines, MAX_BACKGROUND_WIDGET_LINES, "hidden")
+  : lines;
+ return JSON.stringify(bounded);
 }
 
 export class BackgroundWidgetComponent implements Component {
@@ -50,8 +54,9 @@ export class BackgroundWidgetComponent implements Component {
   this.onLayout?.(max, expanded);
   const heading = truncateToWidth(this.theme.fg("dim", `background subagents · ctrl+shift+b manage${expanded ? " · expanded" : " · ctrl+o details"}`), max);
   const lines = [heading, ...new SnapshotComponent(details(children.map(stripPrompt)), expanded, undefined, this.renderedAt).render(max)];
-  return limitRenderedLines(lines, MAX_BACKGROUND_WIDGET_LINES, "ctrl+shift+b manage")
-   .map((line) => truncateToWidth(line, max));
+  // ctrl+o expands past the collapsed budget so every active child remains visible.
+  const bounded = expanded ? lines : limitRenderedLines(lines, MAX_BACKGROUND_WIDGET_LINES, "ctrl+shift+b manage");
+  return bounded.map((line) => truncateToWidth(line, max));
  }
 }
 

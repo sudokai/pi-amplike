@@ -179,7 +179,8 @@ export class ToolSnapshotComponent {
    if (child.ownership === "background") lines.push(...renderBackgroundAcknowledgementLines(child));
    else lines.push(...renderLines({ ...this.details, children: [child] }, this.expanded, this.renderedAt, Math.max(1, width)));
   }
-  const bounded = this.details.children.length > 1
+  // Multi-child collapsed cards stay short; expanded (ctrl+o) must show every child.
+  const bounded = !this.expanded && this.details.children.length > 1
    ? limitRenderedLines(lines, MAX_FOREGROUND_BATCH_LINES, "artifacts retain full output")
    : lines;
   return paintLines(bounded, width, this.background);

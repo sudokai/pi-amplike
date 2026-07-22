@@ -124,15 +124,29 @@ try {
 		label: `agent-${index}`,
 		activities: Array.from({ length: 15 }, (__, activity) => `activity ${index}-${activity}`),
 	}));
-	const widgetLines = new BackgroundWidgetComponent(() => children, theme, () => true).render(120);
-	eq("background widget obeys fixed line budget", widgetLines.length <= MAX_BACKGROUND_WIDGET_LINES, true);
-	eq("background widget reports hidden lines", widgetLines.at(-1)?.includes("hidden"), true);
-	const narrowWidgetLines = new BackgroundWidgetComponent(() => children, theme, () => true).render(12);
+	const collapsedWidgetLines = new BackgroundWidgetComponent(() => children, theme, () => false).render(120);
+	eq("background widget obeys fixed line budget when collapsed", collapsedWidgetLines.length <= MAX_BACKGROUND_WIDGET_LINES, true);
+	eq("background widget reports hidden lines when collapsed", collapsedWidgetLines.at(-1)?.includes("hidden"), true);
+	const narrowWidgetLines = new BackgroundWidgetComponent(() => children, theme, () => false).render(12);
 	eq("background widget truncation notice respects width", narrowWidgetLines.every((line) => visibleWidth(line) <= 12), true);
 
-	const batchLines = new ToolSnapshotComponent({ ...details(children[0]), children }, true).render(120);
-	eq("foreground batch obeys fixed line budget", batchLines.length <= MAX_FOREGROUND_BATCH_LINES, true);
-	eq("foreground batch reports hidden lines", batchLines.at(-1)?.includes("hidden"), true);
+	const expandedWidgetLines = new BackgroundWidgetComponent(() => children, theme, () => true).render(120);
+	eq("expanded background widget exceeds collapsed budget", expandedWidgetLines.length > MAX_BACKGROUND_WIDGET_LINES, true);
+	for (const entry of children) {
+		eq(`expanded background widget includes ${entry.label}`, expandedWidgetLines.some((line) => line.includes(entry.label)), true);
+	}
+	eq("expanded background widget has no hidden-lines notice", expandedWidgetLines.some((line) => line.includes("hidden")), false);
+
+	const collapsedBatchLines = new ToolSnapshotComponent({ ...details(children[0]), children }, false).render(120);
+	eq("foreground batch obeys fixed line budget when collapsed", collapsedBatchLines.length <= MAX_FOREGROUND_BATCH_LINES, true);
+	eq("foreground batch reports hidden lines when collapsed", collapsedBatchLines.at(-1)?.includes("hidden"), true);
+
+	const expandedBatchLines = new ToolSnapshotComponent({ ...details(children[0]), children }, true).render(120);
+	eq("expanded foreground batch exceeds collapsed budget", expandedBatchLines.length > MAX_FOREGROUND_BATCH_LINES, true);
+	for (const entry of children) {
+		eq(`expanded foreground batch includes ${entry.label}`, expandedBatchLines.some((line) => line.includes(entry.label)), true);
+	}
+	eq("expanded foreground batch has no hidden-lines notice", expandedBatchLines.some((line) => line.includes("hidden")), false);
 
 	const changedOutsideCollapsedTail = children.map((entry, index) =>
 		index === 0 ? { ...entry, activities: ["changed but hidden", ...entry.activities.slice(1)] } : entry,
