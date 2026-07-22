@@ -16,6 +16,7 @@ from [mikeyobrien/pi-tidy-tools](https://github.com/mikeyobrien/pi-tidy-tools).
 - `runner.ts` `finalizeChildTerminalStatus`: on child exit, set status from settlement, process errors, and assistant `stopReason` / `errorMessage` (`error` and `aborted` → `failed`; `length` → `warning`).
 - `envelope.ts` `envelopeChildContent`: for `failed` / `cancelled` / `warning`, put harness `error` before partial `response`; used for parent tool CDATA, on-disk artifacts (`store.saveRun`), and TUI terminal stamps.
 - `coordinator.ts` `status` / `ui.ts` management: list **all** terminal children for the parent session (foreground + background, collected or not) under one `Terminal` group; keep `terminalUncollected` as a filtered subset. FG terminal overlay actions are inspect-only; BG terminal keeps delivery/collect eligibility.
+- `coordinator.ts` `inspect`: strip ANSI and collapse whitespace in the activity summary before embedding it in plain tool/control text (TUI cards keep colored activity lines).
 - `ui.ts` / `render.ts`: collapsed background widget and multi-child tool cards keep line budgets; **expanded (ctrl+o) does not truncate** so every child remains visible.
 
 Do **not** also install `@mobrienv/pi-tidy-subagents` alongside pi-amplike (duplicate `subagent` tool).

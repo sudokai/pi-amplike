@@ -280,6 +280,26 @@ const put = (coordinator, entry) => {
 			&& inspect.content[0].text.includes(`transcript ${runDir}/child-fg.transcript.md`),
 		true,
 	);
+
+	const colored = put(coordinator, {
+		id: "child-ansi",
+		target: "run:child-ansi",
+		label: "ansi-child",
+		ownership: "foreground",
+		status: "running",
+		activities: [
+			"\x1b[2m·\x1b[0m \x1b[36m📖\x1b[0m \x1b[1mread\x1b[0m notes",
+			"  \x1b[2m/tmp/implement-loop-notes-b169ff44.md\x1b[0m \x1b[2m→\x1b[0m \x1b[32mdone\x1b[0m",
+		],
+		artifactPath: `${runDir}/child-ansi.md`,
+	});
+	const inspectAnsi = await coordinator.control("inspect", colored.target);
+	const inspectText = inspectAnsi.content[0].text;
+	eq(
+		"inspect strips ANSI from activity summary",
+		!inspectText.includes("\x1b[") && inspectText.includes("activity: /tmp/implement-loop-notes-b169ff44.md → done"),
+		true,
+	);
 }
 
 {

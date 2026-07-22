@@ -12,6 +12,7 @@ import { backgroundWidgetStateKey, BackgroundWidgetComponent, type BackgroundSta
 const ACTIVE = new Set(["queued", "starting", "running"]);
 const terminal = (child: ChildState): boolean => !ACTIVE.has(child.status);
 const xml = (value: string): string => value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+const ansiPattern = /\x1b\[[0-9;]*m/g;
 const bounded = (value: string, limit = 4 * 1024): string => {
  let result = "";
  for (const character of value) {
@@ -19,6 +20,11 @@ const bounded = (value: string, limit = 4 * 1024): string => {
   result += character;
  }
  return result;
+};
+/** Plain one-line activity for inspect/control text (TUI cards keep ANSI; tool results must not). */
+const inspectActivity = (child: ChildState, limit = 512): string => {
+ const raw = child.streamingLine?.trim() || child.activities?.at(-1) || child.error || "no activity yet";
+ return bounded(raw.replace(ansiPattern, "").replace(/\s+/g, " ").trim() || "no activity yet", limit);
 };
 
 export interface CoordinatorContext {
@@ -329,7 +335,7 @@ export class SessionCoordinator {
  }
 
  private inspect(record: ChildRecord): ControlResponse {
-  const activity = record.child.streamingLine?.trim() || record.child.activities?.at(-1) || record.child.error || "no activity yet";
+  const activity = inspectActivity(record.child);
   const transcriptPath = record.child.transcriptPath
    ?? transcriptPathFor(record.details.runDir, record.child.id);
   record.child.transcriptPath = transcriptPath;
