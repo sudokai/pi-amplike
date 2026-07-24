@@ -38,6 +38,7 @@ import {
   buildResumeLaunchPlan,
   resolveResumeLaunchBehavior,
 } from "./src/launch.ts";
+import { applySubagentPaneSplit, resolveSubagentPaneSplit } from "./src/pane-layout.ts";
 import {
   buildOutcomeMessage,
   renderSubagentPing,
@@ -562,7 +563,9 @@ async function executeSubagentSpawn(
 
   let started;
   try {
-    started = await deps.client.agentStart(plan.agentStart);
+    started = await deps.client.agentStart(
+      applySubagentPaneSplit(plan.agentStart, runningSubagents.values()),
+    );
   } catch (error: any) {
     const message = error?.message ?? String(error);
     return errorResult(`Failed to start herdr pane for "${params.name}": ${message}`, message);
@@ -768,7 +771,9 @@ async function executeSubagentResume(
 
   let started;
   try {
-    started = await deps.client.agentStart(plan.agentStart);
+    started = await deps.client.agentStart(
+      applySubagentPaneSplit(plan.agentStart, runningSubagents.values()),
+    );
   } catch (error: any) {
     const message = error?.message ?? String(error);
     return errorResult(`Failed to start herdr pane for "${plan.name}": ${message}`, message);
@@ -1242,6 +1247,7 @@ export const __test__ = {
   resolveInterruptTarget,
   resolveResumeLaunchBehavior,
   resolveResumeOutcome,
+  resolveSubagentPaneSplit,
   setDeps(overrides: Partial<RuntimeDeps>): void {
     deps = { ...deps, ...overrides };
   },

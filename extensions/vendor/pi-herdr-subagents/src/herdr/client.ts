@@ -44,6 +44,8 @@ export interface HerdrClient {
     cwd: string;
     tabId?: string;
     split?: "right" | "down";
+    /** When set, split from this pane instead of the orchestrator's current pane. */
+    splitFromPaneId?: string;
     env?: Record<string, string>;
     argv: string[];
   }): Promise<AgentStartResult>;
@@ -162,7 +164,7 @@ export function createHerdrClient(opts?: { exec?: ExecFn; bin?: string }): Herdr
       const splitArgs = [
         "pane",
         "split",
-        "--current",
+        ...(p.splitFromPaneId ? [p.splitFromPaneId] : ["--current"]),
         "--direction",
         p.split ?? "right",
         "--cwd",
