@@ -10,7 +10,7 @@
  *
  * Usage:
  *   /handoff now implement this for teams as well
- *   /handoff -mode fast execute phase one of the plan
+ *   /handoff -mode <name> execute phase one of the plan
  *   /handoff -model anthropic/claude-haiku-4-5 check other places that need this fix
  *   /handoff -thinking high execute phase one of the plan
  *

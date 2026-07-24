@@ -42,9 +42,9 @@ export function shouldAutoExitOnAgentEnd(
   if (messages) {
     // A turn that ends at a user message produced no assistant reply — the
     // request errored / is retrying. This happens on resumed sessions whose
-    // first request times out (verified live, pi 0.80.3): agent_end fires
-    // while pi is "Retrying (1/3)"; walking backwards would find the
-    // PREVIOUS conversation's assistant and shut pi down mid-retry.
+    // first request times out: agent_end fires while pi is retrying; walking
+    // backwards would find the previous conversation's assistant and shut pi
+    // down mid-retry.
     const last = messages[messages.length - 1];
     if (last?.role === "user") return false;
 

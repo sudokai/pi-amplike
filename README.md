@@ -21,7 +21,7 @@
 - **`/subagent`**, **`/iterate`**, **`/subagents-init`** — Commands for spawn, forked iteration, and example agent setup
 - Per-spawn **amplike modes** (`modes.json`) expand to model/thinking with precedence: parent session → `mode` → explicit `model` → explicit `thinking`
 - Requires **herdr** ≥ 0.7.5 — run pi inside a herdr pane (`HERDR_ENV=1`)
-- Children are interactive Pi sessions in separate panes; results are delivered to the parent automatically via steer messages
+- Children run as Pi sessions in separate panes; results are delivered to the parent automatically via steer messages
 
 ### Permissions
 - **`/permissions`** command toggles bash command allow/deny permissions, directly read from AmpCode's configuration files.
@@ -77,7 +77,7 @@ When your conversation gets long or you want to branch off to a focused task, yo
 **Manual handoff via command:**
 ```
 /handoff now implement this for teams as well
-/handoff -mode fast execute phase one of the plan
+/handoff -mode <name> execute phase one of the plan
 /handoff -model anthropic/claude-haiku-4-5 check other places that need this fix
 /handoff -thinking high now implement the performance work
 ```
@@ -145,7 +145,7 @@ The `subagent` tool is fire-and-forget: it returns immediately and the harness d
 
 Use **`subagent_resume`** to continue a finished subagent, **`subagent_interrupt`** to stop one, and **`subagents_list`** to see running subagents. **`/subagents-init`** copies example agents (`worker`, `planner`, `scout`, `reviewer`) into your agent directory.
 
-Child sessions use normal Pi `.jsonl` session files under the child's cwd. Inspect panes in herdr or read session artifacts under the orchestrator session directory.
+Child sessions use normal Pi `.jsonl` session files under the child's cwd, with `parentSession` pointing at the orchestrator. By default they are lineage-only (linked, no copied conversation); `fork: true` also copies the parent conversation. Inspect panes in herdr or read session artifacts under the orchestrator session directory.
 
 ### Permissions
 
@@ -191,7 +191,7 @@ Notes:
 - **Herdr required** for subagents — install herdr ≥ 0.7.5 and run pi inside a herdr pane
 - Per-spawn **`mode` / `model` / `thinking`** on `subagent` preserved (amplike `modes.json` expansion)
 - Child sessions are normal Pi `.jsonl` files in herdr panes (not tidy `child-*.md` / `run.json` artifacts)
-- Removed `PI_TIDY_SUBAGENT_CHILD` fail-closed bash path — herdr children are interactive sessions with their own TUI
+- Removed `PI_TIDY_SUBAGENT_CHILD` fail-closed bash path — herdr children run full Pi TUI sessions in their panes
 
 ## Breaking changes (2.0.0)
 

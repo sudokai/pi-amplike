@@ -333,13 +333,13 @@ export function buildLaunchPlan(
 
   const launchBehavior = resolveLaunchBehavior(params, agentDefs);
   const seedSession = {
-    mode: launchBehavior.seededSessionMode,
+    mode: launchBehavior.sessionMode,
     parentSessionFile: ctx.parentSessionFile,
     childSessionFile: sessionFile,
     childCwd: targetCwd,
   };
 
-  // ── Task message (wrapper instructions only for blank-session modes) ──
+  // ── Task message (wrapper instructions for artifact-backed lineage-only launches) ──
   const modeHint = autoExit
     ? "Complete your task autonomously."
     : "Complete your task. When finished, call the subagent_done tool. The user can interact with you at any time.";
@@ -386,9 +386,8 @@ export function buildLaunchPlan(
     piArgv.push("--tools", toolAllowlist);
   }
 
-  // Task delivery: fork inherits the conversation → direct arg; blank-session
-  // modes get the artifact-backed handoff so wrapper instructions arrive as
-  // the initial user message.
+  // Task delivery: fork inherits the conversation → direct arg; lineage-only
+  // launches use an artifact so wrapper instructions arrive as the initial user message.
   let taskArtifactFile: string | null = null;
   let taskArg: string;
   if (launchBehavior.taskDelivery === "direct") {

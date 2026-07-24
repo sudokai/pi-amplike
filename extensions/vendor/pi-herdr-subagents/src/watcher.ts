@@ -206,8 +206,8 @@ export function watchSubagent(
       const outcome = classify(trigger);
       if (!outcome) return;
 
-      // Stale-sidecar guard (verified live in the resume race): resuming a
-      // session whose previous pi is still tearing down can see the OLD
+      // Stale-sidecar guard: resuming a session whose previous pi is still
+      // tearing down can see the OLD wrapper's exit-0 sidecar land AFTER
       // wrapper's exit-0 sidecar land AFTER subagent_resume cleared it. An
       // exit-0 wrapper closes its pane immediately, so exit 0 signalled by a
       // sidecar while OUR pane is still alive cannot be ours — consume it and

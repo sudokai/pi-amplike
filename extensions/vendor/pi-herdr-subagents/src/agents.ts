@@ -107,7 +107,6 @@ function parseOptionalBoolean(value: string | undefined): boolean | undefined {
 
 function parseSessionMode(value: string | undefined): SubagentSessionMode | undefined {
   if (value === "lineage-only" || value === "fork") return value;
-  // Legacy frontmatter — standalone was removed; lineage-only is the default.
   if (value === "standalone") return "lineage-only";
   return undefined;
 }
@@ -211,7 +210,6 @@ export function resolveLaunchBehavior(
   agentDefs: AgentDefaults | null,
 ): {
   sessionMode: SubagentSessionMode;
-  seededSessionMode: SubagentSessionMode;
   inheritsConversationContext: boolean;
   taskDelivery: "direct" | "artifact";
 } {
@@ -219,7 +217,6 @@ export function resolveLaunchBehavior(
   const inheritsConversationContext = sessionMode === "fork";
   return {
     sessionMode,
-    seededSessionMode: sessionMode,
     inheritsConversationContext,
     taskDelivery: inheritsConversationContext ? "direct" : "artifact",
   };

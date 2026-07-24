@@ -30,12 +30,12 @@ ok(
 );
 
 const lineageBehavior = resolveLaunchBehavior({ name: "x", task: "y" }, null);
-ok("lineage-only seeds session", lineageBehavior.seededSessionMode === "lineage-only");
+ok("lineage-only seeds session", lineageBehavior.sessionMode === "lineage-only");
 ok("lineage-only uses artifact delivery", lineageBehavior.taskDelivery === "artifact");
 ok("lineage-only does not inherit context", !lineageBehavior.inheritsConversationContext);
 
 const forkBehavior = resolveLaunchBehavior({ name: "x", task: "y", fork: true }, null);
-ok("fork seeds session", forkBehavior.seededSessionMode === "fork");
+ok("fork seeds session", forkBehavior.sessionMode === "fork");
 ok("fork uses direct delivery", forkBehavior.taskDelivery === "direct");
 ok("fork inherits context", forkBehavior.inheritsConversationContext);
 
@@ -43,6 +43,6 @@ const legacy = parseAgentDefinition(
 	"---\nname: legacy\nsession-mode: standalone\n---\nbody",
 	"legacy",
 );
-ok("legacy standalone frontmatter → lineage-only", legacy?.sessionMode === "lineage-only");
+ok("session-mode standalone alias → lineage-only", legacy?.sessionMode === "lineage-only");
 
 process.exit(failures === 0 ? 0 : 1);

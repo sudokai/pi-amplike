@@ -280,7 +280,7 @@ function startWidgetRefresh(): void {
 
 // ── watcher arming + outcome→steer wiring ───────────────────────────────────
 
-/** Intentional child shutdown (auto-exit, subagent_done, caller_ping) — close leftover pane. */
+/** Close the herdr pane after intentional child shutdown (completed or ping). */
 export function shouldAutoCloseSubagentPane(outcome: SubagentOutcome): boolean {
   return outcome.kind === "completed" || outcome.kind === "ping";
 }
