@@ -43,7 +43,7 @@
     "node": ">=22.19.0"
   },
   "scripts": {
-    "test": "node test/mode-utils.test.mjs && node test/subagent-mode.test.mjs && node test/permissions-bash.test.mjs"
+    "test": "node test/mode-utils.test.mjs && node test/subagent-mode.test.mjs && node test/subagent-session-mode.test.mjs && node test/subagent-pane-close.test.mjs && node test/permissions-bash.test.mjs"
   },
   "devDependencies": {
     "@mariozechner/jiti": "^2.6.5",

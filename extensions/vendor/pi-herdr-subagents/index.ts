@@ -280,6 +280,23 @@ function startWidgetRefresh(): void {
 
 // ── watcher arming + outcome→steer wiring ───────────────────────────────────
 
+/** Intentional child shutdown (auto-exit, subagent_done, caller_ping) — close leftover pane. */
+export function shouldAutoCloseSubagentPane(outcome: SubagentOutcome): boolean {
+  return outcome.kind === "completed" || outcome.kind === "ping";
+}
+
+async function closeSubagentPaneIfNeeded(
+  running: RunningSubagent,
+  outcome: SubagentOutcome,
+): Promise<void> {
+  if (!shouldAutoCloseSubagentPane(outcome)) return;
+  try {
+    await deps.client.paneClose(running.paneId);
+  } catch {
+    // Pane may already be gone — best-effort cleanup.
+  }
+}
+
 function armWatcher(
   pi: ExtensionAPI,
   running: RunningSubagent,
@@ -302,10 +319,11 @@ function armWatcher(
       stream: getEventStream(),
       signal: watcherAbort.signal,
     })
-    .then((outcome) => {
+    .then(async (outcome) => {
       runningSubagents.delete(running.id);
       markSubagentInactive(running.id);
       updateWidget();
+      await closeSubagentPaneIfNeeded(running, outcome);
       const contextUsage =
         outcome.kind === "cancelled"
           ? null
@@ -537,9 +555,7 @@ async function executeSubagentSpawn(
 
   // Execute the plan: write artifacts, seed the child session, start the pane.
   writePlanFiles(plan.files);
-  if (plan.seedSession) {
-    seedSubagentSessionFile(plan.seedSession);
-  }
+  seedSubagentSessionFile(plan.seedSession);
 
   let started;
   try {
@@ -1219,6 +1235,7 @@ export const __test__ = {
   isInsideHerdr,
   runningSubagents,
   renderSubagentWidgetLines,
+  shouldAutoCloseSubagentPane,
   resolveInterruptTarget,
   resolveResumeLaunchBehavior,
   resolveResumeOutcome,

@@ -15,7 +15,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 
-export type SubagentSessionMode = "standalone" | "lineage-only" | "fork";
+export type SubagentSessionMode = "lineage-only" | "fork";
 
 /** The subset of `subagent` tool params that agent-def resolution consults. */
 export interface SubagentSpawnParams {
@@ -106,9 +106,9 @@ function parseOptionalBoolean(value: string | undefined): boolean | undefined {
 }
 
 function parseSessionMode(value: string | undefined): SubagentSessionMode | undefined {
-  if (value === "standalone" || value === "lineage-only" || value === "fork") {
-    return value;
-  }
+  if (value === "lineage-only" || value === "fork") return value;
+  // Legacy frontmatter — standalone was removed; lineage-only is the default.
+  if (value === "standalone") return "lineage-only";
   return undefined;
 }
 
@@ -203,7 +203,7 @@ export function resolveEffectiveSessionMode(
   agentDefs: AgentDefaults | null,
 ): SubagentSessionMode {
   if (params.fork) return "fork";
-  return agentDefs?.sessionMode ?? "standalone";
+  return agentDefs?.sessionMode ?? "lineage-only";
 }
 
 export function resolveLaunchBehavior(
@@ -211,7 +211,7 @@ export function resolveLaunchBehavior(
   agentDefs: AgentDefaults | null,
 ): {
   sessionMode: SubagentSessionMode;
-  seededSessionMode: "lineage-only" | "fork" | null;
+  seededSessionMode: SubagentSessionMode;
   inheritsConversationContext: boolean;
   taskDelivery: "direct" | "artifact";
 } {
@@ -219,7 +219,7 @@ export function resolveLaunchBehavior(
   const inheritsConversationContext = sessionMode === "fork";
   return {
     sessionMode,
-    seededSessionMode: sessionMode === "standalone" ? null : sessionMode,
+    seededSessionMode: sessionMode,
     inheritsConversationContext,
     taskDelivery: inheritsConversationContext ? "direct" : "artifact",
   };

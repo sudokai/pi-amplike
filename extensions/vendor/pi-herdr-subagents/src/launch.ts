@@ -88,13 +88,13 @@ export interface LaunchPlan {
   syspromptFile: string | null;
   /** Files the executor must write (mkdir -p dirname first). Includes the launch script. */
   files: Array<{ path: string; content: string }>;
-  /** Session seeding the executor must perform before launch (fork/lineage modes). */
+  /** Session seeding the executor must perform before launch. */
   seedSession: {
     mode: "lineage-only" | "fork";
     parentSessionFile: string;
     childSessionFile: string;
     childCwd: string;
-  } | null;
+  };
   /** Arguments for HerdrClient.agentStart(). */
   agentStart: {
     name: string;
@@ -150,7 +150,7 @@ export function buildSubagentToolAllowlist(effectiveTools?: string): string | nu
 /**
  * Build the positional prompt args for a Pi CLI subagent launch.
  *
- * In artifact-backed launches (lineage-only, standalone), Pi's buildInitialMessage()
+ * In artifact-backed launches (lineage-only), Pi's buildInitialMessage()
  * concatenates @file content with messages[0] into one initial prompt. That breaks
  * /skill: expansion because the message no longer starts with "/skill:". Only
  * messages[1..] are sent as separate follow-up prompts where /skill: is recognized.
@@ -332,14 +332,12 @@ export function buildLaunchPlan(
   const sessionFile = join(childSessionDir, `${sessionTimestamp}_${uuid}.jsonl`);
 
   const launchBehavior = resolveLaunchBehavior(params, agentDefs);
-  const seedSession = launchBehavior.seededSessionMode
-    ? {
-        mode: launchBehavior.seededSessionMode,
-        parentSessionFile: ctx.parentSessionFile,
-        childSessionFile: sessionFile,
-        childCwd: targetCwd,
-      }
-    : null;
+  const seedSession = {
+    mode: launchBehavior.seededSessionMode,
+    parentSessionFile: ctx.parentSessionFile,
+    childSessionFile: sessionFile,
+    childCwd: targetCwd,
+  };
 
   // ── Task message (wrapper instructions only for blank-session modes) ──
   const modeHint = autoExit
