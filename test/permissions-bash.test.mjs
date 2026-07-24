@@ -27,13 +27,7 @@ const eq = (name, got, want) => {
 	if (!match) failures++;
 };
 
-const {
-	decideBash,
-	FAIL_CLOSED_BASH_REASON,
-	DENIED_BASH_REASON,
-	isChildRpcEnv,
-	isChildRpcProcess,
-} = core;
+const { decideBash, FAIL_CLOSED_BASH_REASON, DENIED_BASH_REASON } = core;
 const { shouldFailClosedBash } = permissions;
 const cwd = process.cwd();
 
@@ -100,44 +94,10 @@ eq("resolveBashAction git push", core.resolveBashAction("git push origin main", 
 	fs.rmSync(projectRoot, { recursive: true, force: true });
 }
 
-// isChildRpcEnv / isChildRpcProcess
-{
-	ok("isChildRpcEnv false by default", isChildRpcEnv({}) === false);
-	ok("isChildRpcEnv true when set", isChildRpcEnv({ PI_TIDY_SUBAGENT_CHILD: "1" }) === true);
-	ok("isChildRpcEnv ignores other values", isChildRpcEnv({ PI_TIDY_SUBAGENT_CHILD: "0" }) === false);
-
-	ok(
-		"isChildRpcProcess false with env only",
-		isChildRpcProcess({ PI_TIDY_SUBAGENT_CHILD: "1" }, ["node", "pi"]) === false,
-	);
-	ok(
-		"isChildRpcProcess true with env + rpc mode",
-		isChildRpcProcess({ PI_TIDY_SUBAGENT_CHILD: "1" }, ["node", "pi", "--mode", "rpc"]) === true,
-	);
-	ok(
-		"isChildRpcProcess false with rpc mode only",
-		isChildRpcProcess({}, ["node", "pi", "--mode", "rpc"]) === false,
-	);
-}
-
 // shouldFailClosedBash predicate used by the extension
 {
-	ok(
-		"fail-closed when no UI",
-		shouldFailClosedBash(false, {}, ["node", "pi"]) === true,
-	);
-	ok(
-		"interactive when has UI and no child env",
-		shouldFailClosedBash(true, {}, ["node", "pi"]) === false,
-	);
-	ok(
-		"ambient child env alone does not fail-close parent with UI",
-		shouldFailClosedBash(true, { PI_TIDY_SUBAGENT_CHILD: "1" }, ["node", "pi"]) === false,
-	);
-	ok(
-		"true child RPC fail-closes even with hasUI",
-		shouldFailClosedBash(true, { PI_TIDY_SUBAGENT_CHILD: "1" }, ["node", "pi", "--mode", "rpc"]) === true,
-	);
+	ok("fail-closed when no UI", shouldFailClosedBash(false) === true);
+	ok("interactive when has UI", shouldFailClosedBash(true) === false);
 }
 
 // Extension registers tool_call; non-bash tools pass through

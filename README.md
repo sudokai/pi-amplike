@@ -15,13 +15,13 @@
 - **`session_query` tool** - The agent in handed-off sessions automatically gets the ability to query the parent session for context, decisions, or code changes; analysis uses the queried session's own model
 - Use `/resume` to switch between and navigate handed-off sessions
 
-### Subagents (tidy-style RPC children)
-- **`subagent` tool** - Launch ordered foreground and/or background child Pi agents (`agents[]` with `label?`, `reason`, `prompt`, optional `mode` / `model` / `thinking` / `execution`)
-- **`subagent_control` tool** - Inspect, steer, cancel, set delivery, or collect session-scoped background children
-- **`/subagents`** (and `Ctrl+Shift+B`) - TUI management overlay for all session children (active + finished); finished remain listed for the process lifetime
-- Per-child **amplike modes** (`modes.json`) expand to model/thinking with precedence: parent session → `mode` → explicit `model` → explicit `thinking`
-- Children are RPC processes with full extension discovery; nested subagents disabled; Amp bash fail-closed (never prompts)
-- Results use tidy envelopes and agent-dir artifacts (`child-*.md` final result, `child-*.transcript.md` live steer pack, `run.json`, event jsonl) — not Pi session `.jsonl` paths for `session_query`
+### Subagents (herdr async panes)
+- **`subagent` tool** — Spawn a sub-agent in a dedicated herdr pane (`name`, `task`, optional `agent` / `mode` / `model` / `thinking` / `cwd` / `fork` / …)
+- **`subagent_resume`**, **`subagent_interrupt`**, **`subagents_list`** — Resume, interrupt, or list running subagents
+- **`/subagent`**, **`/iterate`**, **`/subagents-init`** — Commands for spawn, forked iteration, and example agent setup
+- Per-spawn **amplike modes** (`modes.json`) expand to model/thinking with precedence: parent session → `mode` → explicit `model` → explicit `thinking`
+- Requires **herdr** ≥ 0.7.1 — run pi inside a herdr pane (`HERDR_ENV=1`)
+- Children are interactive Pi sessions in separate panes; results are delivered to the parent automatically via steer messages
 
 ### Permissions
 - **`/permissions`** command toggles bash command allow/deny permissions, directly read from AmpCode's configuration files.
@@ -62,9 +62,11 @@ npm install
 
 Then add `"packages/pi-amplike"` to the `"packages"` array in `~/.pi/agent/settings.json`.
 
-**Do not also install `@mobrienv/pi-tidy-subagents`** — pi-amplike vendors that runtime and registers the same `subagent` / `subagent_control` tools.
+**Do not also install `pi-herdr-subagents`** — pi-amplike vendors that runtime and registers the same `subagent` tools.
 
-**Node:** `>=22.19.0` (matches the vendored tidy runtime).
+**Herdr:** install [herdr](https://github.com/ogulcancelik/herdr) ≥ 0.7.1 and run pi inside a herdr pane for subagents.
+
+**Node:** `>=22.19.0`.
 
 ## Usage
 
@@ -123,55 +125,27 @@ session_query("/path/to/session.jsonl", "What approach was chosen?")
 
 ### Subagents
 
-Ask your agent to "use subagents to …" for independent, well-defined work that benefits from isolation or parallelism.
+Subagents require pi to run inside a [herdr](https://github.com/ogulcancelik/herdr) pane. Ask your agent to "use subagents to …" for independent work that benefits from isolation or parallelism.
 
-The `subagent` tool takes an ordered `agents[]` list (no `tasks[]` shim):
+The `subagent` tool is fire-and-forget: it returns immediately and the harness delivers the child's result as a steer message when finished.
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `reason` | yes | Short present-tense intent for the transcript |
-| `prompt` | yes | Full context and objective sent verbatim to the child |
-| `label` | no | Display label (default `agent`) |
+| `name` | yes | Display name for the subagent pane |
+| `task` | yes | Task/prompt for the sub-agent |
+| `agent` | no | Agent definition from `~/.pi/agent/agents/<name>.md` or `.pi/agents/` |
 | `mode` | no | Amplike mode name from `modes.json` (only when the user asks) |
-| `model` | no | Exact `provider/model-id` (omit inherits parent / mode) |
+| `model` | no | Exact `provider/model-id` (omit inherits parent / mode / agent) |
 | `thinking` | no | `off` \| `minimal` \| `low` \| `medium` \| `high` \| `xhigh` \| `max` |
-| `execution` | no | `foreground` (default, waits) or `background` (ack + control plane) |
+| `cwd` | no | Working directory for the child |
+| `fork` | no | Inherit parent session conversation |
+| `interactive` | no | Long-running pane the user drives |
 
-**Mode / model / thinking precedence** (same as handoff): parent session → `mode` → explicit `model` → explicit `thinking`. Unknown `mode` fails the whole batch (no partial children). Invalid or unauthenticated explicit models also fail preflight.
+**Mode / model / thinking precedence** (same as handoff): parent session → `mode` → explicit `model` → explicit `thinking`. Unknown `mode` or invalid model fails before launch.
 
-**Foreground** children block the tool call until they settle; **background** children register and return durable acknowledgements. Use `subagent_control` (`status` / `steer` / `cancel` / `inspect` / `set_delivery` / `collect` / `background`) or `/subagents` to manage them. `status` and `/subagents` list **all** children for this parent session, including finished foreground/background (collected or not); `terminalUncollected` remains a filtered subset for compatibility. `inspect` stays path-oriented (status, ownership, artifact/transcript paths; no inlined body).
+Use **`subagent_resume`** to continue a finished subagent, **`subagent_interrupt`** to stop one, and **`subagents_list`** to see running subagents. **`/subagents-init`** copies example agents (`worker`, `planner`, `scout`, `reviewer`) into your agent directory.
 
-#### Child process and bash policy
-
-Each child is spawned roughly as:
-
-```text
-pi --mode rpc --no-session --approve \
-   --model … --thinking …
-```
-
-with env `PI_TIDY_SUBAGENT_CHILD=1`.
-
-- Full extension discovery (user, project, and package extensions load as in a normal session)
-- Extension-registered tools are available
-- Nested `subagent` is disabled in children (`PI_TIDY_SUBAGENT_CHILD=1`)
-- `--approve` so children skip interactive project-trust UI
-- **Bash fail-closed** via the permissions extension (never prompts in children):
-  - YOLO (`/permissions` → yolo) → allow all bash
-  - Amp `allow` → run
-  - Amp `ask` / `deny` / `reject` → block with a clear error
-- Parent interactive `/permissions` still prompts on `ask` in the main session
-
-Artifacts for a run live under the Pi agent dir (tidy store):
-
-| File | Role |
-|------|------|
-| `run.json` | Run manifest (children metadata, status, paths) |
-| `child-*.md` | Final result body only (envelope content) |
-| `child-*.transcript.md` | Live human-readable steer pack (prompt, thinking, tools, partial stream, steers) |
-| `child-*.jsonl` | Full raw RPC event log |
-
-`subagent_control` `inspect` resolves finished children still held in the current session (or via exact-target legacy disk load) and returns status plus `artifactPath` and `transcriptPath` (no transcript body inlined). Use these files (and tool envelopes) instead of `session_query` for subagent work.
+Child sessions use normal Pi `.jsonl` session files under the child's cwd. Inspect panes in herdr or read session artifacts under the orchestrator session directory.
 
 ### Permissions
 
@@ -205,18 +179,25 @@ Notes:
 | Component | Type | Description |
 |-----------|------|-------------|
 | [amp-skills](extensions/amp-skills.ts) | Extension | Adds Amp-compatible skill discovery paths (`~/.config/agents/skills`, `~/.config/amp/skills`, `.agents/skills`) |
-| [permissions](extensions/permissions.ts) | Extension | Amp bash permissions (`amp.commands.allowlist` / `amp.permissions`); `/permissions` toggles `enabled` vs `yolo`; fail-closed (no prompt) in RPC children and other no-UI sessions |
+| [permissions](extensions/permissions.ts) | Extension | Amp bash permissions (`amp.commands.allowlist` / `amp.permissions`); `/permissions` toggles `enabled` vs `yolo`; fail-closed (no prompt) in no-UI sessions |
 | [handoff](extensions/handoff.ts) | Extension | `/handoff [-mode <name>] [-model <provider/id>] [-thinking <level>] <goal>` command + `handoff` tool (with `mode`/`model`/`thinkingLevel` params) for AI-powered context transfer |
 | [modes](extensions/modes.ts) | Extension | Prompt mode manager with model/thinking/color presets, editor border overlay, and shortcuts |
-| [subagent](extensions/subagent.ts) | Extension | Tidy-style `subagent` + `subagent_control` with per-child amplike `mode`; vendored runtime under `extensions/vendor/pi-tidy-subagents/` |
+| [subagent](extensions/subagent.ts) | Extension | Herdr async `subagent` tools with per-spawn amplike `mode`; vendored runtime under `extensions/vendor/pi-herdr-subagents/` |
 | [session-query](extensions/session-query.ts) | Extension | `session_query` tool for querying parent sessions; uses the queried session's own model for analysis |
 | [session-query](skills/session-query/) | Skill | Instructions for using the session_query tool |
+
+## Breaking changes (3.0.0)
+
+- **Subagents:** tidy-style RPC children (`agents[]`, `subagent_control`, `/subagents`, `Ctrl+Shift+B`) replaced by **herdr async panes** (`subagent`, `subagent_resume`, `subagent_interrupt`, `subagents_list`, `/subagent`, `/iterate`, `/subagents-init`)
+- **Herdr required** for subagents — install herdr ≥ 0.7.1 and run pi inside a herdr pane
+- Per-spawn **`mode` / `model` / `thinking`** on `subagent` preserved (amplike `modes.json` expansion)
+- Child sessions are normal Pi `.jsonl` files in herdr panes (not tidy `child-*.md` / `run.json` artifacts)
+- Removed `PI_TIDY_SUBAGENT_CHILD` fail-closed bash path — herdr children are interactive sessions with their own TUI
 
 ## Breaking changes (2.0.0)
 
 - In-process `tasks[]` subagent runner and **`/btw`** are removed
-- Tool schema is tidy-style **`agents[]`** (`reason`, `prompt`, optional `mode`/`model`/`thinking`/`execution`) plus **`subagent_control`**
-- Subagents no longer produce Pi `.jsonl` session files for `session_query`
+- Tool schema was tidy-style **`agents[]`** plus **`subagent_control`** (superseded in 3.0.0 by herdr tools)
 - Node engine requirement is **`>=22.19.0`**
 
 ## Why "AmpCode-like"?
@@ -230,4 +211,4 @@ Amp Code has excellent session management built-in - you can branch conversation
 
 MIT
 
-Vendored [pi-tidy-subagents](https://github.com/mikeyobrien/pi-tidy-tools/tree/main/packages/pi-tidy-subagents) is MIT (see `extensions/vendor/pi-tidy-subagents/THIRD_PARTY.md`).
+Vendored [pi-herdr-subagents](https://github.com/modem-dev/pi-herdr-subagents) is MIT (see `extensions/vendor/pi-herdr-subagents/THIRD_PARTY.md`).

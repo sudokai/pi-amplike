@@ -1,7 +1,7 @@
 {
   "name": "pi-amplike",
-  "version": "2.0.0",
-  "description": "Pi skills and extensions that provide Amp Code-like workflows (handoff, permissions, modes, tidy-style subagents).",
+  "version": "3.0.0",
+  "description": "Pi skills and extensions that provide Amp Code-like workflows (handoff, permissions, modes, herdr subagents).",
   "license": "MIT",
   "homepage": "https://github.com/pasky/pi-amplike",
   "repository": {
@@ -43,7 +43,7 @@
     "node": ">=22.19.0"
   },
   "scripts": {
-    "test": "node test/mode-utils.test.mjs && node test/subagent-mode.test.mjs && node test/child-args.test.mjs && node test/permissions-bash.test.mjs && node test/concurrency-cap.test.mjs && node test/runner-terminal-status.test.mjs && node test/envelope-content.test.mjs && node test/render-stability.test.mjs && node test/transcript.test.mjs && node test/subagent-status-list.test.mjs"
+    "test": "node test/mode-utils.test.mjs && node test/subagent-mode.test.mjs && node test/permissions-bash.test.mjs"
   },
   "devDependencies": {
     "@mariozechner/jiti": "^2.6.5",

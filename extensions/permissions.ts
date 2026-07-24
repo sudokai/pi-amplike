@@ -23,8 +23,7 @@
  *   { "permissions": { "mode": "enabled" | "yolo" } }
  *   Persisted by the /permissions command across pi invocations.
  *
- * Amplike RPC children (env + --mode rpc) and other no-UI sessions never prompt
- * on ask. Parent TUI still uses interactive select on ask.
+ * No-UI sessions never prompt on ask. Parent TUI still uses interactive select on ask.
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -34,7 +33,6 @@ import {
 	decideBash,
 	DENIED_BASH_REASON,
 	GLOBAL_SETTINGS,
-	isChildRpcProcess,
 	loadAmplikeSettings,
 	loadSettings,
 	resolveBashAction,
@@ -46,9 +44,9 @@ import {
 // Loaded from amplike.json on startup; persisted on /permissions toggle.
 let permissionMode: "enabled" | "yolo" = loadAmplikeSettings().permissions?.mode ?? "enabled";
 
-/** True when bash must not open an interactive prompt (child RPC or no UI). */
-export function shouldFailClosedBash(hasUI: boolean, env: NodeJS.ProcessEnv = process.env, argv: readonly string[] = process.argv): boolean {
-	return isChildRpcProcess(env, argv) || !hasUI;
+/** True when bash must not open an interactive prompt (no UI). */
+export function shouldFailClosedBash(hasUI: boolean): boolean {
+	return !hasUI;
 }
 
 export default function (pi: ExtensionAPI) {

@@ -1,139 +1,121 @@
 /**
- * Per-child mode expansion for tidy-style subagent requests.
+ * Per-spawn mode expansion for herdr subagent launch requests.
  *
  * Precedence (same as handoff / mode-utils): parent → mode → model → thinking.
- * Expands into model/thinking seeds before tidy resolveBatchRuntime so invalid
- * models fail the whole batch cleanly.
+ * Expands into model/thinking seeds before herdr launch planning so invalid
+ * models fail cleanly.
  *
  * Only dimensions selected by the request (or contributed by mode) are seeded.
- * Omitted dimensions stay inherited so tidy can clamp thinking; explicit
- * unsupported thinking still hard-fails in tidy preflight.
+ * Omitted dimensions stay inherited so launch can use agent defaults / parent.
  */
 
 import { loadModeSpec, resolveModelAndThinking } from "./mode-utils.js";
-import { parseExactModelRef } from "../vendor/pi-tidy-subagents/runtime.js";
+import { parseExactModelRef } from "./model-ref.js";
 
-export type AgentModeRequest = {
-	label?: string;
-	reason: string;
-	prompt: string;
+export type SubagentModeLaunchParams = {
 	mode?: string;
 	model?: string;
 	thinking?: string;
-	execution?: "foreground" | "background";
 };
 
-export type ExpandedAgentRequest = {
-	label?: string;
-	reason: string;
-	prompt: string;
-	model?: string;
-	thinking?: string;
-	execution?: "foreground" | "background";
-};
-
-export type ExpandAgentModesParams = {
+export type ExpandSubagentModeOptions = {
 	cwd: string;
 	modelRegistry: {
 		find(provider: string, modelId: string): { provider: string; id: string } | undefined | null;
 	};
 	parentModel: { provider: string; id: string };
 	parentThinking: string;
-	agents: AgentModeRequest[];
+	who?: string;
 };
 
-/**
- * Expand per-child `mode` into model/thinking seeds.
- * Unknown mode → throws (batch preflight hard fail).
- * Mode model not in registry (and no explicit model) → throws.
- * Explicit model missing/malformed → throws (never soft-fallback).
- * Seeds only dimensions selected by the request or mode.
- */
-export async function expandAgentModes(params: ExpandAgentModesParams): Promise<ExpandedAgentRequest[]> {
-	const { cwd, modelRegistry, parentModel, parentThinking, agents } = params;
-	const out: ExpandedAgentRequest[] = [];
+type ModeSeedContext = ExpandSubagentModeOptions & {
+	who: string;
+	mode?: string;
+	model?: string;
+	thinking?: string;
+};
 
-	for (let index = 0; index < agents.length; index++) {
-		const agent = agents[index]!;
-		const who = `child[${index}] label=${JSON.stringify(agent.label || "agent")}`;
+async function expandModeSeeds(ctx: ModeSeedContext): Promise<{ model?: string; thinking?: string }> {
+	const { cwd, modelRegistry, parentModel, parentThinking, who, mode, model, thinking } = ctx;
 
-		let modeContributesModel = false;
-		let modeContributesThinking = false;
+	let modeContributesModel = false;
+	let modeContributesThinking = false;
 
-		if (agent.mode) {
-			const spec = await loadModeSpec(cwd, agent.mode);
-			if (!spec) {
-				throw new Error(`${who}: unknown mode ${JSON.stringify(agent.mode)}`);
-			}
-			modeContributesModel = Boolean(spec.provider && spec.modelId);
-			modeContributesThinking = Boolean(spec.thinkingLevel);
-			if (modeContributesModel && !agent.model) {
-				const found = modelRegistry.find(spec.provider!, spec.modelId!);
-				if (!found) {
-					throw new Error(
-						`${who}: mode ${JSON.stringify(agent.mode)} model ${JSON.stringify(`${spec.provider}/${spec.modelId}`)} not found in registry`,
-					);
-				}
-			}
+	if (mode) {
+		const spec = await loadModeSpec(cwd, mode);
+		if (!spec) {
+			throw new Error(`${who}: unknown mode ${JSON.stringify(mode)}`);
 		}
-
-		// Explicit model must resolve exactly — never soft-fall back to parent/mode.
-		if (agent.model) {
-			const parsed = parseExactModelRef(agent.model);
-			if (!parsed) {
-				throw new Error(
-					`${who}: invalid model reference ${JSON.stringify(agent.model)} (expected exact provider/model-id)`,
-				);
-			}
-			const found = modelRegistry.find(parsed.provider, parsed.modelId);
+		modeContributesModel = Boolean(spec.provider && spec.modelId);
+		modeContributesThinking = Boolean(spec.thinkingLevel);
+		if (modeContributesModel && !model) {
+			const found = modelRegistry.find(spec.provider!, spec.modelId!);
 			if (!found) {
 				throw new Error(
-					`${who}: model ${JSON.stringify(agent.model)} not found in registry`,
+					`${who}: mode ${JSON.stringify(mode)} model ${JSON.stringify(`${spec.provider}/${spec.modelId}`)} not found in registry`,
 				);
 			}
 		}
-
-		const seedModel = Boolean(agent.model || modeContributesModel);
-		const seedThinking = Boolean(agent.thinking || modeContributesThinking);
-		const hasOverride = Boolean(agent.mode || agent.model || agent.thinking);
-
-		if (!hasOverride) {
-			const { mode: _m, ...rest } = agent;
-			out.push(rest);
-			continue;
-		}
-
-		const resolved = await resolveModelAndThinking(
-			cwd,
-			modelRegistry,
-			parentModel,
-			parentThinking,
-			{
-				mode: agent.mode,
-				model: agent.model,
-				thinkingLevel: agent.thinking,
-			},
-		);
-
-		if (seedModel && (!resolved.model?.provider || !resolved.model?.id)) {
-			throw new Error(`${who}: no model available after mode/model resolution`);
-		}
-
-		// Seed only selected dimensions so tidy inherits/clamps the rest.
-		const expanded: ExpandedAgentRequest = {
-			label: agent.label,
-			reason: agent.reason,
-			prompt: agent.prompt,
-			...(agent.execution ? { execution: agent.execution } : {}),
-		};
-		if (seedModel) {
-			expanded.model = `${resolved.model.provider}/${resolved.model.id}`;
-		}
-		if (seedThinking) {
-			expanded.thinking = resolved.thinkingLevel;
-		}
-		out.push(expanded);
 	}
 
+	if (model) {
+		const parsed = parseExactModelRef(model);
+		if (!parsed) {
+			throw new Error(
+				`${who}: invalid model reference ${JSON.stringify(model)} (expected exact provider/model-id)`,
+			);
+		}
+		const found = modelRegistry.find(parsed.provider, parsed.modelId);
+		if (!found) {
+			throw new Error(`${who}: model ${JSON.stringify(model)} not found in registry`);
+		}
+	}
+
+	const seedModel = Boolean(model || modeContributesModel);
+	const seedThinking = Boolean(thinking || modeContributesThinking);
+	const hasOverride = Boolean(mode || model || thinking);
+
+	if (!hasOverride) {
+		return {};
+	}
+
+	const resolved = await resolveModelAndThinking(cwd, modelRegistry, parentModel, parentThinking, {
+		mode,
+		model,
+		thinkingLevel: thinking,
+	});
+
+	if (seedModel && (!resolved.model?.provider || !resolved.model?.id)) {
+		throw new Error(`${who}: no model available after mode/model resolution`);
+	}
+
+	const seeds: { model?: string; thinking?: string } = {};
+	if (seedModel) {
+		seeds.model = `${resolved.model.provider}/${resolved.model.id}`;
+	}
+	if (seedThinking) {
+		seeds.thinking = resolved.thinkingLevel;
+	}
+	return seeds;
+}
+
+/** Expand amplike `mode` / `model` / `thinking` on a herdr subagent spawn request. */
+export async function expandSubagentLaunchParams<T extends SubagentModeLaunchParams>(
+	params: T,
+	options: ExpandSubagentModeOptions,
+): Promise<Omit<T, "mode">> {
+	const who = options.who ?? "subagent";
+	const seeds = await expandModeSeeds({
+		...options,
+		who,
+		mode: params.mode,
+		model: params.model,
+		thinking: params.thinking,
+	});
+
+	const { mode: _mode, ...rest } = params;
+	const out = { ...rest } as Omit<T, "mode">;
+	if (seeds.model) (out as SubagentModeLaunchParams).model = seeds.model;
+	if (seeds.thinking) (out as SubagentModeLaunchParams).thinking = seeds.thinking;
 	return out;
 }

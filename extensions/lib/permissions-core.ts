@@ -2,8 +2,8 @@
  * Amp permissions — pure decision logic.
  *
  * Shared by the interactive `permissions` extension (which adds UI for "ask"
- * in the parent TUI) and fail-closed paths (child RPC / no UI). Keeping the
- * rules here is the single source of truth so those paths cannot diverge.
+ * in the parent TUI) and fail-closed paths (no UI). Keeping the rules here is
+ * the single source of truth so those paths cannot diverge.
  */
 
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
@@ -369,26 +369,6 @@ export const FAIL_CLOSED_BASH_REASON =
 
 /** User-facing reason when Amp rules deny or reject a bash command. */
 export const DENIED_BASH_REASON = "Denied by amp permissions";
-
-/** True when `PI_TIDY_SUBAGENT_CHILD=1` is set. */
-export function isChildRpcEnv(env: NodeJS.ProcessEnv = process.env): boolean {
-	return env.PI_TIDY_SUBAGENT_CHILD === "1";
-}
-
-/**
- * True for amplike-spawned Pi RPC children: `PI_TIDY_SUBAGENT_CHILD=1` and `--mode rpc`.
- * Both are required so a parent interactive session is not treated as a child.
- */
-export function isChildRpcProcess(
-	env: NodeJS.ProcessEnv = process.env,
-	argv: readonly string[] = process.argv,
-): boolean {
-	if (!isChildRpcEnv(env)) return false;
-	for (let i = 0; i < argv.length - 1; i++) {
-		if (argv[i] === "--mode" && argv[i + 1] === "rpc") return true;
-	}
-	return false;
-}
 
 /**
  * Pure bash decision (no ExtensionAPI).
