@@ -33,12 +33,6 @@ type LoadedModes = {
 
 const CUSTOM_MODE_NAME = "custom" as const;
 
-const BOOTSTRAP_MODES: Array<{ name: ModeName; spec: Required<Pick<ModeSpec, "provider" | "modelId" | "thinkingLevel">> }> = [
-	{ name: "rush", spec: { provider: "anthropic", modelId: "claude-haiku-4-5", thinkingLevel: "low" } },
-	{ name: "smart", spec: { provider: "anthropic", modelId: "claude-opus-4-6", thinkingLevel: "low" } },
-	{ name: "deep", spec: { provider: "openai-codex", modelId: "gpt-5.3-codex", thinkingLevel: "high" } },
-];
-
 const MODE_UI_CONFIGURE = "Configure modes…";
 const MODE_UI_ADD = "Add mode…";
 const MODE_UI_BACK = "Back";
@@ -201,16 +195,11 @@ function sanitizeModeSpec(spec: unknown): ModeSpec {
 	};
 }
 
-function createBootstrapModesFile(): ModesFile {
-	const modes: Record<ModeName, ModeSpec> = {};
-	for (const mode of BOOTSTRAP_MODES) {
-		modes[mode.name] = { ...mode.spec };
-	}
-
+function createEmptyModesFile(): ModesFile {
 	return {
 		version: 1,
-		currentMode: "smart",
-		modes,
+		currentMode: "",
+		modes: {},
 	};
 }
 
@@ -225,7 +214,7 @@ function ensureCurrentModeValid(file: ModesFile): void {
 		return;
 	}
 	if (!file.currentMode || !(file.currentMode in file.modes) || file.currentMode === CUSTOM_MODE_NAME) {
-		file.currentMode = names.includes("smart") ? "smart" : names[0]!;
+		file.currentMode = names[0]!;
 	}
 }
 
@@ -266,8 +255,8 @@ async function loadModesFile(filePath: string): Promise<LoadedModes> {
 
 		if (orderedModeNames(file.modes).length === 0) {
 			return {
-				data: createBootstrapModesFile(),
-				explicitlyEmptyModes: false,
+				data: createEmptyModesFile(),
+				explicitlyEmptyModes: true,
 			};
 		}
 
@@ -275,8 +264,8 @@ async function loadModesFile(filePath: string): Promise<LoadedModes> {
 		return { data: file, explicitlyEmptyModes: false };
 	} catch {
 		return {
-			data: createBootstrapModesFile(),
-			explicitlyEmptyModes: false,
+			data: createEmptyModesFile(),
+			explicitlyEmptyModes: true,
 		};
 	}
 }
@@ -314,11 +303,11 @@ type ModeRuntime = {
 const runtime: ModeRuntime = {
 	filePath: "",
 	fileMtimeMs: null,
-	data: createBootstrapModesFile(),
-	explicitlyEmptyModes: false,
-	overlayEnabled: true,
-	lastRealMode: "smart",
-	currentMode: "smart",
+	data: createEmptyModesFile(),
+	explicitlyEmptyModes: true,
+	overlayEnabled: false,
+	lastRealMode: "",
+	currentMode: CUSTOM_MODE_NAME,
 	applying: false,
 };
 

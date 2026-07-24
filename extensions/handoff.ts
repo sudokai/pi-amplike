@@ -10,7 +10,7 @@
  *
  * Usage:
  *   /handoff now implement this for teams as well
- *   /handoff -mode rush execute phase one of the plan
+ *   /handoff -mode fast execute phase one of the plan
  *   /handoff -model anthropic/claude-haiku-4-5 check other places that need this fix
  *   /handoff -thinking high execute phase one of the plan
  *
@@ -509,7 +509,7 @@ export default function (pi: ExtensionAPI) {
 			"Transfer context to a new focused session. ONLY use this when the user explicitly asks for a handoff. Provide a goal describing what the new session should focus on.",
 		parameters: Type.Object({
 			goal: Type.String({ description: "The goal/task for the new session" }),
-			mode: Type.Optional(Type.String({ description: "Amplike mode name to start the new session with (e.g. 'rush', 'smart', 'deep')" })),
+			mode: Type.Optional(Type.String({ description: "Amplike mode name to start the new session with (from modes.json)" })),
 			model: Type.Optional(Type.String({ description: "Model to start the new session with, as provider/modelId (e.g. 'anthropic/claude-haiku-4-5')" })),
 			thinkingLevel: Type.Optional(Type.String({
 				description: "Thinking level for the new session: off, minimal, low, medium, high, or xhigh. Only based on explicit user instructions. Overrides mode preset thinking.",

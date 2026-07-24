@@ -372,7 +372,7 @@ const SubagentParams = Type.Object({
   mode: Type.Optional(
     Type.String({
       description:
-        "Amplike mode name from modes.json (e.g. 'rush', 'smart', 'deep'). Only when the user explicitly requests a mode. Expanded to model/thinking before launch (parent → mode → model → thinking).",
+        "Amplike mode name from modes.json. Only when the user explicitly requests a mode. Expanded to model/thinking before launch (parent → mode → model → thinking).",
     }),
   ),
   model: Type.Optional(Type.String({ description: `Model override. ${MODEL_FIELD_DESCRIPTION}` })),
@@ -418,7 +418,7 @@ const SETUP_HINT =
   "Subagents require pi to run inside a herdr pane (https://github.com/ogulcancelik/herdr). " +
   "Start herdr in your terminal, open a pane, and run pi there — herdr injects HERDR_ENV, " +
   "HERDR_PANE_ID, and HERDR_SOCKET_PATH into every pane, which this extension needs to " +
-  "launch and observe subagents. Install herdr ≥ 0.7.1 and restart pi inside it.";
+  "launch and observe subagents. Install herdr ≥ 0.7.5 and restart pi inside it.";
 
 const SPAWN_TOOL_NAMES = ["subagent", "subagent_resume", "subagent_interrupt", "subagents_list"];
 

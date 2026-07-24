@@ -20,7 +20,7 @@
 - **`subagent_resume`**, **`subagent_interrupt`**, **`subagents_list`** — Resume, interrupt, or list running subagents
 - **`/subagent`**, **`/iterate`**, **`/subagents-init`** — Commands for spawn, forked iteration, and example agent setup
 - Per-spawn **amplike modes** (`modes.json`) expand to model/thinking with precedence: parent session → `mode` → explicit `model` → explicit `thinking`
-- Requires **herdr** ≥ 0.7.1 — run pi inside a herdr pane (`HERDR_ENV=1`)
+- Requires **herdr** ≥ 0.7.5 — run pi inside a herdr pane (`HERDR_ENV=1`)
 - Children are interactive Pi sessions in separate panes; results are delivered to the parent automatically via steer messages
 
 ### Permissions
@@ -64,7 +64,7 @@ Then add `"packages/pi-amplike"` to the `"packages"` array in `~/.pi/agent/setti
 
 **Do not also install `pi-herdr-subagents`** — pi-amplike vendors that runtime and registers the same `subagent` tools.
 
-**Herdr:** install [herdr](https://github.com/ogulcancelik/herdr) ≥ 0.7.1 and run pi inside a herdr pane for subagents.
+**Herdr:** install [herdr](https://github.com/ogulcancelik/herdr) ≥ 0.7.5 and run pi inside a herdr pane for subagents.
 
 **Node:** `>=22.19.0`.
 
@@ -77,13 +77,13 @@ When your conversation gets long or you want to branch off to a focused task, yo
 **Manual handoff via command:**
 ```
 /handoff now implement this for teams as well
-/handoff -mode rush execute phase one of the plan
+/handoff -mode fast execute phase one of the plan
 /handoff -model anthropic/claude-haiku-4-5 check other places that need this fix
 /handoff -thinking high now implement the performance work
 ```
 
 Optional flags (can be combined):
-- `-mode <name>` — start the new session in a named mode (e.g. `rush`, `smart`, `deep`); may set model and thinking from `modes.json`
+- `-mode <name>` — start the new session in a named mode from `modes.json`; may set model and thinking
 - `-model <provider/id>` — start the new session with a specific model (e.g. `anthropic/claude-haiku-4-5`); overrides the mode's model only
 - `-thinking <level>` — thinking level for the new session: `off`, `minimal`, `low`, `medium`, `high`, or `xhigh`; overrides the mode's thinking preset
 
@@ -170,9 +170,8 @@ The selected mode is persisted in `~/.pi/agent/amplike.json` and restored on the
 ```
 
 Notes:
-- The extension bootstraps with default modes are `rush`, `smart`, and `deep`; they somewhat mirror Amp defaults.
-- Modes config is loaded from `.pi/modes.json` (project), falling back to `~/.pi/agent/modes.json` (global).
-- Deleting all modes or setting `"modes": {}` in your modes file disables mode overlay behavior (shortcuts + editor mode border), while keeping `/mode` config UI available.
+- Modes are user-defined in `.pi/modes.json` (project) or `~/.pi/agent/modes.json` (global). Use `/mode configure` to add your first mode.
+- Setting `"modes": {}` or having no modes disables the mode overlay (shortcuts + editor border), while keeping `/mode` config UI available.
 
 ## Components
 
@@ -189,7 +188,7 @@ Notes:
 ## Breaking changes (3.0.0)
 
 - **Subagents:** tidy-style RPC children (`agents[]`, `subagent_control`, `/subagents`, `Ctrl+Shift+B`) replaced by **herdr async panes** (`subagent`, `subagent_resume`, `subagent_interrupt`, `subagents_list`, `/subagent`, `/iterate`, `/subagents-init`)
-- **Herdr required** for subagents — install herdr ≥ 0.7.1 and run pi inside a herdr pane
+- **Herdr required** for subagents — install herdr ≥ 0.7.5 and run pi inside a herdr pane
 - Per-spawn **`mode` / `model` / `thinking`** on `subagent` preserved (amplike `modes.json` expansion)
 - Child sessions are normal Pi `.jsonl` files in herdr panes (not tidy `child-*.md` / `run.json` artifacts)
 - Removed `PI_TIDY_SUBAGENT_CHILD` fail-closed bash path — herdr children are interactive sessions with their own TUI

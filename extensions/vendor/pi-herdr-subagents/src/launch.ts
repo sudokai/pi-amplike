@@ -7,7 +7,7 @@
 //
 // Design (PLAN.md Key Decisions #4–#7):
 // - The generated wrapper script is the single place env/wrapping/exit-capture
-//   happens. herdr launches it as a direct argv process (`bash <script>`) — no
+//   happens. herdr launches it via pane split + pane run (`bash <script>`) — no
 //   shell typing, no launch race, no verify/retry machinery.
 // - Env correctness for direnv/devenv repos: the script exports the
 //   orchestrator's PATH + curated PI_SUBAGENT_* vars (never a full env dump),
