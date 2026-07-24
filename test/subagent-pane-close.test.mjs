@@ -1,6 +1,6 @@
 /**
- * Auto-close herdr pane when a non-interactive subagent shuts down intentionally.
- * Interactive subagents keep their panes open so the user can continue inspecting them.
+ * Auto-close herdr pane when a subagent shuts down intentionally via
+ * subagent_done or caller_ping, regardless of interactivity.
  *
  * Run: node test/subagent-pane-close.test.mjs
  */
@@ -28,9 +28,9 @@ const cancelled = { kind: "cancelled" };
 ok("non-interactive completed → close pane", shouldAutoCloseSubagentPane(completed, false));
 ok("non-interactive ping → close pane", shouldAutoCloseSubagentPane(ping, false));
 
-// Interactive subagents: never auto-close, even on intentional exits.
-ok("interactive completed → keep pane", !shouldAutoCloseSubagentPane(completed, true));
-ok("interactive ping → keep pane", !shouldAutoCloseSubagentPane(ping, true));
+// Interactive subagents: close pane on intentional exits (subagent_done / caller_ping).
+ok("interactive completed → close pane", shouldAutoCloseSubagentPane(completed, true));
+ok("interactive ping → close pane", shouldAutoCloseSubagentPane(ping, true));
 
 // Other outcomes never auto-close, regardless of interactivity.
 ok("completed-user-exit → keep pane", !shouldAutoCloseSubagentPane(completedUserExit, false));
