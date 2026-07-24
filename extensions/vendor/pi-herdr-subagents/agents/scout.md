@@ -4,7 +4,7 @@ description: Quickly investigates a codebase and reports relevant findings
 tools: read,bash
 thinking: low
 spawning: false
-auto-exit: true
+interactive: false
 system-prompt: replace
 ---
 

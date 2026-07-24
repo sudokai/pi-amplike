@@ -39,7 +39,6 @@ export interface RunningSubagent {
   sessionFile: string;
   launchScriptFile: string;
   interactive: boolean;
-  autoExit: boolean;
   abortController?: AbortController;
 }
 

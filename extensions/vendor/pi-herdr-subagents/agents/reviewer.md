@@ -4,7 +4,7 @@ description: Reviews code changes for correctness, security, and maintainability
 tools: read,bash
 thinking: high
 spawning: false
-auto-exit: true
+interactive: false
 system-prompt: replace
 ---
 

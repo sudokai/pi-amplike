@@ -281,9 +281,10 @@ export default function (pi: ExtensionAPI) {
     name: "subagent_done",
     label: "Subagent Done",
     description:
-      "Call this tool when you have completed your task. " +
-      "It will close this session and return your results to the main session. " +
-      "Your LAST assistant message before calling this becomes the summary returned to the caller.",
+      "Call this tool when you have completed your task. Required for interactive subagents: it closes this session and returns your results to the main session. " +
+      "Non-interactive subagents auto-exit and do not need to call this. " +
+      "Your LAST assistant message before calling this tool becomes the summary returned to the caller. " +
+      "Do not finish with a plain text message; invoke this tool as your final action.",
     parameters: Type.Object({}),
     async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
       const sessionFile = process.env.PI_SUBAGENT_SESSION;

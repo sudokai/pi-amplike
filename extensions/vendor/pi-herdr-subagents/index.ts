@@ -280,8 +280,9 @@ function startWidgetRefresh(): void {
 
 // ── watcher arming + outcome→steer wiring ───────────────────────────────────
 
-/** Close the herdr pane after intentional child shutdown (completed or ping). */
-export function shouldAutoCloseSubagentPane(outcome: SubagentOutcome): boolean {
+/** Close the herdr pane after intentional child shutdown, unless the subagent is interactive. */
+export function shouldAutoCloseSubagentPane(outcome: SubagentOutcome, interactive: boolean): boolean {
+  if (interactive) return false;
   return outcome.kind === "completed" || outcome.kind === "ping";
 }
 
@@ -289,7 +290,7 @@ async function closeSubagentPaneIfNeeded(
   running: RunningSubagent,
   outcome: SubagentOutcome,
 ): Promise<void> {
-  if (!shouldAutoCloseSubagentPane(outcome)) return;
+  if (!shouldAutoCloseSubagentPane(outcome, running.interactive)) return;
   try {
     await deps.client.paneClose(running.paneId);
   } catch {
@@ -416,7 +417,9 @@ const SubagentParams = Type.Object({
   interactive: Type.Optional(
     Type.Boolean({
       description:
-        "Mark the subagent as interactive (long-running, user drives the conversation in its own pane). If omitted, falls back to the agent's `interactive` frontmatter, otherwise the inverse of `auto-exit`.",
+        "If true, the subagent runs interactively: its pane stays open and it must call subagent_done when finished. " +
+        "If false (default), the subagent is an autonomous worker: it auto-exits when done and its pane closes. " +
+        "If omitted, falls back to the agent's `interactive` frontmatter.",
     }),
   ),
 });
@@ -575,7 +578,6 @@ async function executeSubagentSpawn(
     sessionFile: plan.sessionFile,
     launchScriptFile: plan.launchScriptFile,
     interactive: plan.interactive,
-    autoExit: plan.autoExit,
   };
   armWatcher(pi, running);
 
@@ -722,7 +724,7 @@ const RESUME_DESCRIPTION =
 
 async function executeSubagentResume(
   pi: ExtensionAPI,
-  params: { sessionPath: string; name?: string; message?: string; autoExit?: boolean },
+  params: { sessionPath: string; name?: string; message?: string; interactive?: boolean },
   ctx: {
     cwd: string;
     sessionManager: {
@@ -781,7 +783,6 @@ async function executeSubagentResume(
     sessionFile: params.sessionPath,
     launchScriptFile: plan.launchScriptFile,
     interactive: plan.interactive,
-    autoExit: plan.autoExit,
   };
   armWatcher(pi, running, (outcome) =>
     resolveResumeOutcome(outcome, params.sessionPath, entryCountBefore),
@@ -816,10 +817,11 @@ function registerResumeTool(pi: ExtensionAPI): void {
           description: "Optional message to send after resuming (e.g. follow-up instructions)",
         }),
       ),
-      autoExit: Type.Optional(
+      interactive: Type.Optional(
         Type.Boolean({
           description:
-            "Whether the resumed session should automatically exit after completing its response. Defaults to true for autonomous follow-up work; set false for interactive resumed sessions.",
+            "If true, the resumed session is interactive: its pane stays open and it must call subagent_done when finished. " +
+            "If false (default), the resumed session is autonomous: it auto-exits when done and its pane closes.",
         }),
       ),
     }),

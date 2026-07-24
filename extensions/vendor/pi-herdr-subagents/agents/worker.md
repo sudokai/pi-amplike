@@ -4,7 +4,7 @@ description: Implements focused coding tasks and verifies the result
 tools: read,bash,edit,write
 thinking: medium
 spawning: false
-auto-exit: true
+interactive: false
 system-prompt: replace
 ---
 

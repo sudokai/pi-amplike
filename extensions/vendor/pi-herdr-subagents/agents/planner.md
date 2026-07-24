@@ -4,7 +4,7 @@ description: Produces concrete implementation plans without changing files
 tools: read,bash
 thinking: high
 spawning: false
-auto-exit: true
+interactive: false
 system-prompt: replace
 ---
 

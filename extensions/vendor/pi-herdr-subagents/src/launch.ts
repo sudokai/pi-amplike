@@ -106,7 +106,6 @@ export interface LaunchPlan {
   /** The unescaped pi invocation embedded in the wrapper script (piArgv[0] = binary). */
   piArgv: string[];
   interactive: boolean;
-  autoExit: boolean;
   /** Startup crash hold-open window in seconds (0 = disabled). */
   holdOpenSecs: number;
 }
@@ -310,7 +309,6 @@ export function buildLaunchPlan(
   const effectiveSkills = params.skills ?? agentDefs?.skills;
   const effectiveThinking = params.thinking ?? agentDefs?.thinking;
   const interactive = resolveEffectiveInteractive(params, agentDefs);
-  const autoExit = agentDefs?.autoExit ?? false;
 
   const artifactDir = getArtifactDir(ctx.sessionDir, ctx.sessionId);
   const { effectiveCwd, localAgentDir, effectiveAgentDir } = resolveSubagentPaths(
@@ -340,12 +338,15 @@ export function buildLaunchPlan(
   };
 
   // ── Task message (wrapper instructions for artifact-backed lineage-only launches) ──
-  const modeHint = autoExit
-    ? "Complete your task autonomously."
-    : "Complete your task. When finished, call the subagent_done tool. The user can interact with you at any time.";
-  const summaryInstruction = autoExit
-    ? "Your FINAL assistant message should summarize what you accomplished."
-    : "Your FINAL assistant message (before calling subagent_done or before the user exits) should summarize what you accomplished.";
+  const modeHint = interactive
+    ? "Complete your task. When you are finished, your final action MUST be to call the subagent_done tool. " +
+      "Do not end with a plain assistant message — you must invoke subagent_done to signal completion. " +
+      "The user can interact with you at any time."
+    : "Complete your task autonomously.";
+  const summaryInstruction = interactive
+    ? "Your FINAL assistant message (immediately before calling subagent_done) should summarize what you accomplished. " +
+      "After that summary, call subagent_done and send no further assistant text."
+    : "Your FINAL assistant message should summarize what you accomplished.";
   const identity = agentDefs?.body ?? params.systemPrompt ?? null;
   const systemPromptMode = agentDefs?.systemPromptMode;
   const identityInSystemPrompt = Boolean(systemPromptMode && identity);
@@ -418,7 +419,7 @@ export function buildLaunchPlan(
   if (params.agent) {
     exports.push(`export PI_SUBAGENT_AGENT=${shellEscape(params.agent)}`);
   }
-  if (autoExit) {
+  if (!interactive) {
     exports.push("export PI_SUBAGENT_AUTO_EXIT=1");
   }
   exports.push(`export PI_SUBAGENT_SESSION=${shellEscape(sessionFile)}`);
@@ -464,7 +465,6 @@ export function buildLaunchPlan(
     },
     piArgv,
     interactive,
-    autoExit,
     holdOpenSecs,
   };
 }
@@ -475,20 +475,17 @@ export interface ResumeLaunchParams {
   sessionPath: string;
   name?: string;
   message?: string;
-  autoExit?: boolean;
+  interactive?: boolean;
 }
 
 /**
- * Ported from pi-interactive-subagents: resumed sessions default to
- * autonomous follow-up work (auto-exit, non-interactive); explicit
- * autoExit: false yields an interactive resumed session.
+ * Resumed sessions default to non-interactive (autonomous follow-up work).
+ * Set `interactive: true` to resume into an interactive session that keeps its pane open.
  */
-export function resolveResumeLaunchBehavior(params: { autoExit?: boolean }): {
-  autoExit: boolean;
+export function resolveResumeLaunchBehavior(params: { interactive?: boolean }): {
   interactive: boolean;
 } {
-  const autoExit = params.autoExit ?? true;
-  return { autoExit, interactive: !autoExit };
+  return { interactive: params.interactive ?? false };
 }
 
 export interface ResumeLaunchPlan {
@@ -509,7 +506,6 @@ export interface ResumeLaunchPlan {
   };
   piArgv: string[];
   interactive: boolean;
-  autoExit: boolean;
   holdOpenSecs: number;
 }
 
@@ -531,7 +527,7 @@ export function buildResumeLaunchPlan(
   const now = ctx.now ?? new Date();
   const id = ctx.id ?? Math.random().toString(16).slice(2, 10);
   const displayName = params.name ?? "Resume";
-  const { autoExit, interactive } = resolveResumeLaunchBehavior(params);
+  const { interactive } = resolveResumeLaunchBehavior(params);
 
   const artifactDir = getArtifactDir(ctx.sessionDir, ctx.sessionId);
   const artifactTimestamp = now.toISOString().replace(/[:.]/g, "-").slice(0, 19);
@@ -557,7 +553,7 @@ export function buildResumeLaunchPlan(
     exports.push(`export PI_CODING_AGENT_DIR=${shellEscape(env.PI_CODING_AGENT_DIR)}`);
   }
   exports.push(`export PI_SUBAGENT_NAME=${shellEscape(displayName)}`);
-  if (autoExit) {
+  if (!interactive) {
     exports.push("export PI_SUBAGENT_AUTO_EXIT=1");
   }
   exports.push(`export PI_SUBAGENT_SESSION=${shellEscape(params.sessionPath)}`);
@@ -597,7 +593,6 @@ export function buildResumeLaunchPlan(
     },
     piArgv,
     interactive,
-    autoExit,
     holdOpenSecs,
   };
 }

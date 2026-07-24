@@ -34,7 +34,6 @@ export interface AgentDefaults {
   thinking?: string;
   denyTools?: string;
   spawning?: boolean;
-  autoExit?: boolean;
   interactive?: boolean;
   systemPromptMode?: "append" | "replace";
   sessionMode?: SubagentSessionMode;
@@ -137,7 +136,6 @@ export function parseAgentDefinition(
     thinking: getFrontmatterValue(frontmatter, "thinking"),
     denyTools: getFrontmatterValue(frontmatter, "deny-tools"),
     spawning: parseOptionalBoolean(getFrontmatterValue(frontmatter, "spawning")),
-    autoExit: parseOptionalBoolean(getFrontmatterValue(frontmatter, "auto-exit")),
     interactive: parseOptionalBoolean(getFrontmatterValue(frontmatter, "interactive")),
     sessionMode: parseSessionMode(getFrontmatterValue(frontmatter, "session-mode")),
     cwd: getFrontmatterValue(frontmatter, "cwd"),
@@ -228,23 +226,17 @@ export function resolveLaunchBehavior(
  * Resolution order:
  *   1. Explicit `interactive` tool parameter wins.
  *   2. Explicit `interactive` frontmatter field on the agent.
- *   3. Default: the inverse of `auto-exit`. Agents that auto-exit are
- *      autonomous (scout, worker, reviewer) and the parent session should be
- *      woken on stall/recovery transitions. Agents that don't auto-exit are
- *      driven by the user in their own pane (planner, iterate/fork) and
- *      stall pings are noise.
- *
- * When no agent defs exist at all (bare `subagent({ name, task })` call,
- * typical for `/iterate` with `fork: true`), `autoExit` is undefined and the
- * subagent is treated as interactive — matching the intent of iterate.
+ *   3. Default: `false` (non-interactive). Non-interactive subagents are
+ *      autonomous workers that auto-exit when done and close their pane.
+ *      Interactive subagents keep their pane open and must call subagent_done
+ *      when finished.
  */
 export function resolveEffectiveInteractive(
   params: SubagentSpawnParams,
   agentDefs: AgentDefaults | null,
 ): boolean {
   if (params.interactive != null) return params.interactive;
-  if (agentDefs?.interactive != null) return agentDefs.interactive;
-  return !(agentDefs?.autoExit ?? false);
+  return agentDefs?.interactive ?? false;
 }
 
 export function loadAgentDefaults(agentName: string): AgentDefaults | null {
