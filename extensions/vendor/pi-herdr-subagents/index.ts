@@ -38,7 +38,12 @@ import {
   buildResumeLaunchPlan,
   resolveResumeLaunchBehavior,
 } from "./src/launch.ts";
-import { applySubagentPaneSplit, resolveSubagentPaneSplit } from "./src/pane-layout.ts";
+import {
+  __paneLayoutTest__,
+  maybeResetSubagentPaneLayout,
+  resolveSubagentPaneSplit,
+  startSubagentPaneWithLayout,
+} from "./src/pane-layout.ts";
 import {
   buildOutcomeMessage,
   renderSubagentPing,
@@ -322,6 +327,7 @@ function armWatcher(
     })
     .then(async (outcome) => {
       runningSubagents.delete(running.id);
+      maybeResetSubagentPaneLayout(runningSubagents.size);
       markSubagentInactive(running.id);
       updateWidget();
       await closeSubagentPaneIfNeeded(running, outcome);
@@ -338,6 +344,7 @@ function armWatcher(
     })
     .catch((err: any) => {
       runningSubagents.delete(running.id);
+      maybeResetSubagentPaneLayout(runningSubagents.size);
       markSubagentInactive(running.id);
       updateWidget();
       pi.sendMessage(
@@ -563,8 +570,10 @@ async function executeSubagentSpawn(
 
   let started;
   try {
-    started = await deps.client.agentStart(
-      applySubagentPaneSplit(plan.agentStart, runningSubagents.values()),
+    started = await startSubagentPaneWithLayout(
+      plan.agentStart,
+      runningSubagents.values(),
+      (payload) => deps.client.agentStart(payload),
     );
   } catch (error: any) {
     const message = error?.message ?? String(error);
@@ -771,8 +780,10 @@ async function executeSubagentResume(
 
   let started;
   try {
-    started = await deps.client.agentStart(
-      applySubagentPaneSplit(plan.agentStart, runningSubagents.values()),
+    started = await startSubagentPaneWithLayout(
+      plan.agentStart,
+      runningSubagents.values(),
+      (payload) => deps.client.agentStart(payload),
     );
   } catch (error: any) {
     const message = error?.message ?? String(error);
@@ -1248,6 +1259,8 @@ export const __test__ = {
   resolveResumeLaunchBehavior,
   resolveResumeOutcome,
   resolveSubagentPaneSplit,
+  startSubagentPaneWithLayout,
+  __paneLayoutTest__,
   setDeps(overrides: Partial<RuntimeDeps>): void {
     deps = { ...deps, ...overrides };
   },
