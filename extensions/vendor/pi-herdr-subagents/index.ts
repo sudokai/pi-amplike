@@ -55,6 +55,12 @@ import { expandSubagentLaunchParams } from "../../lib/subagent-mode.js";
 
 /** Absolute path of this module — used to detect losing the tool-registry race. */
 const MODULE_PATH = fileURLToPath(import.meta.url);
+/** pi-amplike re-exports this extension via extensions/subagent.ts. */
+const AMPLIKE_ENTRY_PATH = join(dirname(MODULE_PATH), "..", "..", "subagent.ts");
+
+function isOwnSubagentProvider(path: string | undefined): boolean {
+  return path === MODULE_PATH || path === AMPLIKE_ENTRY_PATH;
+}
 
 // ── /reload safety ──────────────────────────────────────────────────────────
 // /reload re-imports this file, giving fresh module-level state, but closures
@@ -1153,7 +1159,7 @@ export default function herdrSubagents(pi: ExtensionAPI) {
     // warn visibly — never fail silently (PLAN.md Key Decision #3).
     if (registeredRealTools && shouldRegister("subagent")) {
       const winner = pi.getAllTools().find((tool) => tool.name === "subagent");
-      if (winner?.sourceInfo?.path && winner.sourceInfo.path !== MODULE_PATH) {
+      if (winner?.sourceInfo?.path && !isOwnSubagentProvider(winner.sourceInfo.path)) {
         ctx.ui.notify(
           `pi-herdr-subagents: another extension's "subagent" tool won the registry race ` +
             `(${winner.sourceInfo.path}). List pi-herdr-subagents BEFORE pi-interactive-subagents ` +
