@@ -339,13 +339,13 @@ export function buildLaunchPlan(
 
   // ── Task message (wrapper instructions for artifact-backed lineage-only launches) ──
   const modeHint = interactive
-    ? "Complete your task. When you are finished, your final action MUST be to call the subagent_done tool. " +
-      "Do not end with a plain assistant message — you must invoke subagent_done to signal completion. " +
-      "The user can interact with you at any time."
+    ? "Complete the task. When you are finished, provide a clear summary of what you accomplished. " +
+      "The session will remain open so the user can review your work and ask follow-up questions. " +
+      "Do not call the subagent_done tool unless the user explicitly asks you to finish."
     : "Complete your task autonomously.";
   const summaryInstruction = interactive
-    ? "Your FINAL assistant message (immediately before calling subagent_done) should summarize what you accomplished. " +
-      "After that summary, call subagent_done and send no further assistant text."
+    ? "Your final assistant message after completing the task should summarize what you accomplished. " +
+      "If the user asks you to finish (e.g., via /done), provide a final summary and then call the subagent_done tool to return results to the parent and exit the session."
     : "Your FINAL assistant message should summarize what you accomplished.";
   const identity = agentDefs?.body ?? params.systemPrompt ?? null;
   const systemPromptMode = agentDefs?.systemPromptMode;

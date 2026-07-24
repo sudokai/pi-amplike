@@ -228,8 +228,8 @@ export function resolveLaunchBehavior(
  *   2. Explicit `interactive` frontmatter field on the agent.
  *   3. Default: `false` (non-interactive). Non-interactive subagents are
  *      autonomous workers that auto-exit when done and close their pane.
- *      Interactive subagents keep their pane open and must call subagent_done
- *      when finished.
+ *      Interactive subagents keep their pane open for user interaction until the user exits
+ *      or asks the subagent to finish (e.g., via /done).
  */
 export function resolveEffectiveInteractive(
   params: SubagentSpawnParams,

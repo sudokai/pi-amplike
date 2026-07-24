@@ -1,7 +1,8 @@
 /**
  * Extension loaded into every subagent child pi (via `-e <this file>`).
  * - Shows agent identity + available tools as a styled widget above the editor (toggle with Ctrl+Shift+J)
- * - Provides a `subagent_done` tool for autonomous agents to self-terminate
+ * - Provides a `subagent_done` tool to exit the subagent session and return results to the parent
+ * - Provides a `/done` command for interactive sessions to trigger a final summary and exit
  * - Provides a `caller_ping` tool to ask the parent orchestrator for help
  *
  * Ported from pi-interactive-subagents (MIT, HazAT)
@@ -241,6 +242,19 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
+  // /done — ask the subagent to summarize and return results to the parent.
+  // Only meaningful in interactive subagents; non-interactive subagents auto-exit.
+  if (!autoExit) {
+    pi.registerCommand("done", {
+      description: "Ask the subagent to summarize and return results to the parent",
+      handler: async (_args, _ctx) => {
+        pi.sendUserMessage(
+          "Please provide a final summary of what you accomplished and then call the subagent_done tool to return results to the parent and exit this session.",
+        );
+      },
+    });
+  }
+
   pi.registerTool({
     name: "caller_ping",
     label: "Caller Ping",
@@ -281,10 +295,10 @@ export default function (pi: ExtensionAPI) {
     name: "subagent_done",
     label: "Subagent Done",
     description:
-      "Call this tool when you have completed your task. Required for interactive subagents: it closes this session and returns your results to the main session. " +
-      "Non-interactive subagents auto-exit and do not need to call this. " +
+      "Call this tool to exit the subagent session and return your results to the parent. " +
+      "In interactive sessions, only call this when the user explicitly asks you to finish (e.g., via /done). " +
       "Your LAST assistant message before calling this tool becomes the summary returned to the caller. " +
-      "Do not finish with a plain text message; invoke this tool as your final action.",
+      "Do not finish with a plain text message; invoke this tool as your final action when exiting.",
     parameters: Type.Object({}),
     async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
       const sessionFile = process.env.PI_SUBAGENT_SESSION;

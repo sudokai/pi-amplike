@@ -417,7 +417,8 @@ const SubagentParams = Type.Object({
   interactive: Type.Optional(
     Type.Boolean({
       description:
-        "If true, the subagent runs interactively: its pane stays open and it must call subagent_done when finished. " +
+        "If true, the subagent runs interactively: its pane stays open for user interaction until the user exits or asks the subagent to finish (e.g., via /done). " +
+        "The parent will receive the final summary when the session ends. " +
         "If false (default), the subagent is an autonomous worker: it auto-exits when done and its pane closes. " +
         "If omitted, falls back to the agent's `interactive` frontmatter.",
     }),
@@ -820,7 +821,8 @@ function registerResumeTool(pi: ExtensionAPI): void {
       interactive: Type.Optional(
         Type.Boolean({
           description:
-            "If true, the resumed session is interactive: its pane stays open and it must call subagent_done when finished. " +
+            "If true, the resumed session is interactive: its pane stays open for user interaction until the user exits or asks the subagent to finish (e.g., via /done). " +
+            "The parent will receive the final summary when the session ends. " +
             "If false (default), the resumed session is autonomous: it auto-exits when done and its pane closes.",
         }),
       ),
